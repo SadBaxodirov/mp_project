@@ -1,0 +1,2 @@
+store reusable widgets like buttons, texts in this directory
+delete the file after finishing the project/this directory

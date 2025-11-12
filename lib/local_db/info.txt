@@ -1,0 +1,2 @@
+store local database files for the project(sqlite3 databases, shared_preferences, secure_storage, etc)
+delete the file after finishing the project/this directory

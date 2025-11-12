@@ -1,0 +1,2 @@
+store database models that convert dart data to json, and vice versa
+delete the file after finishing the project/this directory
