@@ -1,16 +1,44 @@
-# mp_project
+# Bluebook Mobile
 
-A new Flutter project.
+Flutter project for the **Mobile Programming** class at **NEWUU**.
 
-## Getting Started
+## 🚀 Getting Started
 
-This project is a starting point for a Flutter application.
+1. **Clone the repository**
 
-A few resources to get you started if this is your first Flutter project:
+   git clone https://github.com/SadBaxodirov/mp_project.git  
+   cd mp_project
 
-- [Lab: Write your first Flutter app](https://docs.flutter.dev/get-started/codelab)
-- [Cookbook: Useful Flutter samples](https://docs.flutter.dev/cookbook)
+2. **Open the project**
 
-For help getting started with Flutter development, view the
-[online documentation](https://docs.flutter.dev/), which offers tutorials,
-samples, guidance on mobile development, and a full API reference.
+   Open the folder in **Android Studio**, **VS Code**, or any Flutter-supported IDE.
+
+3. **Install dependencies**
+
+   flutter pub get
+
+4. **Configure Flutter SDK path (if needed)**
+
+   Make sure your IDE is pointing to your Flutter SDK. Common locations:
+
+   **Windows**\
+   `C:\Users\<your_username>\development\flutter  `
+   `C:\src\flutter`
+
+   **Linux / macOS**
+   `/opt/flutter`
+
+5. **Run the project**
+
+   flutter run  
+   Or click **Run ▶️** in your IDE.
+
+## ✅ Notes
+
+- If you see platform-specific issues, run:
+    ```bash
+  flutter doctor
+    ```
+  
+
+  and follow the suggestions.
