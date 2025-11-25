@@ -1,18 +1,36 @@
+import 'dart:convert';
+
 import 'api_client.dart';
 import '../models/test.dart';
+//change to .env file retrieval
+const String baseUrl = "https://sat-practice-tests-api.up.railway.app/api";
 
 class TestApi {
   final ApiClient client;
 
-  TestApi(this.client);
+  TestApi() : client = ApiClient(baseUrl);
 
   Future<List<Test>> getTests() async {
-    final data = await client.get('/tests/');
-    return (data as List).map((json) => Test.fromJson(json)).toList();
+    final response = await client.get('/tests');
+    if (response.statusCode != 200) {
+      throw Exception("Failed to load tests");
+    }
+
+    final List<dynamic> jsonList =
+    jsonDecode(utf8.decode(response.bodyBytes));
+    return jsonList
+        .map((json) => Test.fromJson(json as Map<String, dynamic>))
+        .toList();
   }
 
   Future<Test> getTest(int id) async {
-    final data = await client.get('/tests/$id/');
-    return Test.fromJson(data);
+    final response = await client.get('/tests/$id');
+    if (response.statusCode != 200) {
+      throw Exception("Failed to load test $id");
+    }
+
+    final Map<String, dynamic> json =
+    jsonDecode(utf8.decode(response.bodyBytes));
+    return Test.fromJson(json);
   }
 }
