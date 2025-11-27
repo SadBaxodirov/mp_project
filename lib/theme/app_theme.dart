@@ -9,7 +9,7 @@ class AppTheme {
         seedColor: primary,
         brightness: Brightness.light,
       ).copyWith(
-        background: const Color(0xFFF6F7FB),
+        surface: const Color(0xFFF6F7FB),
       ),
       scaffoldBackgroundColor: const Color(0xFFF6F7FB),
       useMaterial3: true,
@@ -33,7 +33,7 @@ class AppTheme {
           ),
         ),
       ),
-      cardTheme: CardThemeData(
+      cardTheme: CardTheme(
         color: Colors.white,
         elevation: 0,
         margin: EdgeInsets.zero,

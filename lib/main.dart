@@ -1,15 +1,28 @@
 import 'package:flutter/material.dart';
 
+import 'package:provider/provider.dart';
 import 'router.dart';
-import 'services/auth_local.dart';
+import 'features/auth/data/auth_api.dart';
+import 'features/auth/state/auth_provider.dart';
 import 'theme/app_theme.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  final isSignedIn = await AuthLocal.instance.isSignedIn();
-  runApp(BluebookApp(
-    initialRoute: isSignedIn ? AppRouter.home : AppRouter.login,
-  ));
+  final authProvider = AuthProvider(AuthApi());
+  await authProvider.loadFromStorage();
+
+  runApp(
+    MultiProvider(
+      providers: [
+        ChangeNotifierProvider<AuthProvider>.value(value: authProvider),
+      ],
+      child: BluebookApp(
+        initialRoute: authProvider.isLoggedIn
+            ? AppRouter.home
+            : AppRouter.login,
+      ),
+    ),
+  );
 }
 
 

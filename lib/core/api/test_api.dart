@@ -1,14 +1,13 @@
 import 'dart:convert';
 
 import 'api_client.dart';
+import 'api_constants.dart';
 import '../models/test.dart';
-//change to .env file retrieval
-const String baseUrl = "https://sat-practice-tests-api.up.railway.app/api";
 
 class TestApi {
   final ApiClient client;
 
-  TestApi() : client = ApiClient(baseUrl);
+  TestApi() : client = ApiClient(apiBaseUrl);
 
   Future<List<Test>> getTests() async {
     final response = await client.get('/tests');

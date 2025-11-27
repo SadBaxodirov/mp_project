@@ -1,12 +1,11 @@
 import 'dart:convert';
 import 'package:http/http.dart' as http;
 import 'token_storage.dart';
-
-const String baseUrl = "https://sat-practice-tests-api.up.railway.app/api";
+import 'api_constants.dart';
 
 Future<bool> getTokens(String username, String password) async {
   final res = await http.post(
-    Uri.parse("$baseUrl/token/"),
+    Uri.parse("$apiBaseUrl/token/"),
     headers: {"Content-Type": "application/json"},
     body: jsonEncode({"username": username, "password":password}),
   );
@@ -24,7 +23,7 @@ Future<bool> refreshToken() async {
   if (refresh == null) return false;
 
   final res = await http.post(
-    Uri.parse("$baseUrl/token/refresh"),
+    Uri.parse("$apiBaseUrl/token/refresh/"),
     headers: {"Content-Type": "application/json"},
     body: jsonEncode({"refresh": refresh}),
   );
