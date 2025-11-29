@@ -56,6 +56,17 @@ class DatabaseHelper {
     return await db.query('tests', where: 'id IN (${idList.join(',')})', orderBy: 'id DESC');
   }
 
+  Future<void> updateTest(Map<String, dynamic> test) async {
+    final db = await instance.database;
+    final id = test['id'];
+    await db.update('tests', test, where: 'id = ?', whereArgs: [id]);
+  }
+
+  Future<void> deleteTestById(String id) async {
+    final db = await instance.database;
+    await db.delete('tests', where: 'id = ?', whereArgs: [id]);
+  }
+
   Future close() async {
     final db = _database;
     db?.close();

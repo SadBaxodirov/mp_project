@@ -67,6 +67,11 @@ class DatabaseHelper {
     return result;
   }
 
+  Future<void> deleteResultsByTime(String time) async {
+    final db = await instance.database;
+    await db.delete('results', where: 'start_time = ?', whereArgs: [time]);
+  }
+
   Future close() async {
     final db = _database;
     db?.close();
