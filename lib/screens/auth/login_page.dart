@@ -14,13 +14,13 @@ class LoginPage extends StatefulWidget {
 
 class _LoginPageState extends State<LoginPage> {
   final _formKey = GlobalKey<FormState>();
-  final _emailController = TextEditingController();
+  final _usernameController = TextEditingController();
   final _passwordController = TextEditingController();
   String? _error;
 
   @override
   void dispose() {
-    _emailController.dispose();
+    _usernameController.dispose();
     _passwordController.dispose();
     super.dispose();
   }
@@ -32,7 +32,7 @@ class _LoginPageState extends State<LoginPage> {
     final auth = context.read<AuthProvider>();
     try {
       await auth.login(
-        _emailController.text.trim(),
+        _usernameController.text.trim(),
         _passwordController.text,
       );
       if (!mounted) return;
@@ -58,7 +58,7 @@ class _LoginPageState extends State<LoginPage> {
       builder: (_) => AlertDialog(
         title: const Text('Help'),
         content: const Text(
-          'Contact to teacher: f.hayitov@newuu.uz for support to login',
+          'Contact to admin: https://t.me/satislomxonadmin',
         ),
         actions: [
           TextButton(
@@ -104,19 +104,14 @@ class _LoginPageState extends State<LoginPage> {
                       ),
                       const SizedBox(height: 24),
                       TextFormField(
-                        controller: _emailController,
+                        controller: _usernameController,
                         keyboardType: TextInputType.emailAddress,
                         decoration: const InputDecoration(
-                          labelText: 'Email Address',
+                          labelText: 'Username',
                         ),
                         validator: (value) {
                           if (value == null || value.isEmpty) {
-                            return 'Please enter your email';
-                          }
-                          final emailRegex =
-                              RegExp(r'^[\w\.-]+@[\w\.-]+\.\w+$');
-                          if (!emailRegex.hasMatch(value.trim())) {
-                            return 'Enter a valid email';
+                            return 'Please enter your username';
                           }
                           return null;
                         },

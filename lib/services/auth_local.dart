@@ -1,3 +1,4 @@
+//SHOULD BE CHANGED TO USERNAME BASED AUTH
 import 'package:shared_preferences/shared_preferences.dart';
 
 class AuthLocal {
