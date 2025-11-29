@@ -14,15 +14,25 @@ class RegisterPage extends StatefulWidget {
 
 class _RegisterPageState extends State<RegisterPage> {
   final _formKey = GlobalKey<FormState>();
-  final _fullNameController = TextEditingController();
+  final _firstNameController = TextEditingController();
+  final _lastNameController = TextEditingController();
+  final _usernameController = TextEditingController();
   final _emailController = TextEditingController();
+  final _schoolController = TextEditingController();
+  final _gradeController = TextEditingController();
+  final _phoneNumberController = TextEditingController();
   final _passwordController = TextEditingController();
   final _confirmPasswordController = TextEditingController();
   String? _error;
 
   @override
   void dispose() {
-    _fullNameController.dispose();
+    _firstNameController.dispose();
+    _lastNameController.dispose();
+    _usernameController.dispose();
+    _schoolController.dispose();
+    _gradeController.dispose();
+    _phoneNumberController.dispose();
     _emailController.dispose();
     _passwordController.dispose();
     _confirmPasswordController.dispose();
@@ -36,7 +46,12 @@ class _RegisterPageState extends State<RegisterPage> {
     final auth = context.read<AuthProvider>();
     try {
       await auth.register(
-        _fullNameController.text.trim(),
+        _usernameController.text.trim(),
+        _firstNameController.text.trim(),
+        _lastNameController.text.trim(),
+        _schoolController.text.trim(),
+        _gradeController.text.trim(),
+        _phoneNumberController.text.trim(),
         _emailController.text.trim(),
         _passwordController.text,
       );
@@ -90,13 +105,81 @@ class _RegisterPageState extends State<RegisterPage> {
                       ),
                       const SizedBox(height: 24),
                       TextFormField(
-                        controller: _fullNameController,
+                        controller: _firstNameController,
                         decoration:
-                            const InputDecoration(labelText: 'Full Name'),
+                            const InputDecoration(labelText: 'First Name'),
                         validator: (value) {
                           if (value == null || value.isEmpty) {
-                            return 'Please enter your full name';
+                            return 'Please enter your first name';
                           }
+                          return null;
+                        },
+                      ),
+                      const SizedBox(height: 16),
+                      TextFormField(
+                        controller: _lastNameController,
+                        decoration:
+                        const InputDecoration(labelText: 'Last Name'),
+                        validator: (value) {
+                          if (value == null || value.isEmpty) {
+                            return 'Please enter your last name';
+                          }
+                          return null;
+                        },
+                      ),
+                      const SizedBox(height: 16),
+                      TextFormField(
+                        controller: _usernameController,
+                        decoration:
+                        const InputDecoration(labelText: 'Username'),
+                        validator: (value) {
+                          if (value == null || value.isEmpty) {
+                            return 'Please create a new username';
+                          }
+                          return null;
+                        },
+                      ),
+                      const SizedBox(height: 16),
+                      TextFormField(
+                        controller: _schoolController,
+                        decoration:
+                        const InputDecoration(labelText: 'School'),
+                        validator: (value) {
+                          if (value == null || value.isEmpty) {
+                            return 'Please enter school where you study(ied)';
+                          }
+                          return null;
+                        },
+                      ),
+                      const SizedBox(height: 16),
+                      TextFormField(
+                        controller: _gradeController,
+                        decoration:
+                        const InputDecoration(labelText: 'Grade'),
+                        validator: (value) {
+                          if (value == null || value.isEmpty) {
+                            return 'Please enter your grade/level';
+                          }
+                          return null;
+                        },
+                      ),
+                      const SizedBox(height: 16),
+                      TextFormField(
+                        controller: _phoneNumberController,
+                        decoration:
+                        const InputDecoration(labelText: 'Phone number'),
+                        validator: (value) {
+                          if (value == null || value.isEmpty) {
+                            return 'Phone number is required';
+                          }
+
+                          // Must start with +998 and followed by 9 digits
+                          final phoneRegex = RegExp(r'^\+998\d{9}$');
+
+                          if (!phoneRegex.hasMatch(value)) {
+                            return 'Enter phone as +998901234567';
+                          }
+
                           return null;
                         },
                       ),
@@ -122,7 +205,8 @@ class _RegisterPageState extends State<RegisterPage> {
                       TextFormField(
                         controller: _passwordController,
                         obscureText: true,
-                        decoration: const InputDecoration(labelText: 'Password'),
+                        decoration:
+                            const InputDecoration(labelText: 'Password'),
                         validator: (value) {
                           if (value == null || value.isEmpty) {
                             return 'Please enter a password';
@@ -137,8 +221,8 @@ class _RegisterPageState extends State<RegisterPage> {
                       TextFormField(
                         controller: _confirmPasswordController,
                         obscureText: true,
-                        decoration:
-                            const InputDecoration(labelText: 'Confirm Password'),
+                        decoration: const InputDecoration(
+                            labelText: 'Confirm Password'),
                         validator: (value) {
                           if (value == null || value.isEmpty) {
                             return 'Confirm your password';
