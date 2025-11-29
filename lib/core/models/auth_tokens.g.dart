@@ -2,6 +2,10 @@
 
 part of 'auth_tokens.dart';
 
+// **************************************************************************
+// JsonSerializableGenerator
+// **************************************************************************
+
 AuthTokens _$AuthTokensFromJson(Map<String, dynamic> json) => AuthTokens(
       access: json['access'] as String,
       refresh: json['refresh'] as String,

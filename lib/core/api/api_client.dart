@@ -39,6 +39,19 @@ class ApiClient {
     });
   }
 
+  Future<http.Response> delete(String endpoint) {
+    return _sendRequest((token) {
+      final uri = Uri.parse(baseUrl + endpoint);
+
+      final headers = <String, String>{
+        'Accept': 'application/json',
+        if (token != null && token.isNotEmpty) 'Authorization': 'Bearer $token',
+      };
+
+      return http.delete(uri, headers: headers);
+    });
+  }
+
   Future<http.Response> _sendRequest(
       Future<http.Response> Function(String? token) request) async {
     String? token = await TokenStorage.getAccess();
@@ -52,12 +65,11 @@ class ApiClient {
         throw Exception("Unauthorized — login again.");
       }
 
-      // retry
+      // retry with new token
       final newToken = await TokenStorage.getAccess();
       return request(newToken);
     }
 
     return response;
   }
-
 }
