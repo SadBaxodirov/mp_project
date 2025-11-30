@@ -10,7 +10,7 @@ class TestList extends StatefulWidget {
 }
 
 class _TestListState extends State<TestList> {
-  final _db = DatabaseHelper.instance;
+  final _db = DatabaseHelperTests.instance;
   List<Map<String, dynamic>> results = [];
 
   Future<void> _loadTests() async {
