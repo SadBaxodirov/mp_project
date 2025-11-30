@@ -11,19 +11,15 @@ class TestList extends StatefulWidget {
 }
 
 class _TestListState extends State<TestList> {
-  final TextEditingController _searchController = TextEditingController();
-  String _selectedFilter = 'All';
+  final _db = DatabaseHelperTests.instance;
+  List<Map<String, dynamic>> results = [];
 
-  List<_LibraryTest> get _filteredTests {
-    final query = _searchController.text.toLowerCase();
-    return _tests.where((test) {
-      final matchesFilter =
-          _selectedFilter == 'All' || test.tags.contains(_selectedFilter);
-      final matchesSearch = query.isEmpty ||
-          test.title.toLowerCase().contains(query) ||
-          test.description.toLowerCase().contains(query);
-      return matchesFilter && matchesSearch;
-    }).toList();
+  Future<void> _loadTests() async {
+    final data = await _db.getTests();
+    setState(() {
+      results = data;
+    });
+    
   }
 
   @override

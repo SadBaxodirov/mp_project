@@ -1,222 +1,68 @@
 import 'package:flutter/material.dart';
-
+import '../../utils/DB_tests.dart';
+import '../../utils/DB_test_options.dart';
 import '../../router.dart';
+import '../../features/test/state/test_provider.dart';
+import '../../features/test/data/models/test_model.dart';
+
+import '../../features/auth/state/auth_provider.dart';
 
 class TestPage extends StatefulWidget {
-  const TestPage({super.key, this.testList = const []});
-
-  final List<int> testList;
+  final int id;
+  final AuthProvider _authProvider;
+  const TestPage({super.key, required this.id, required AuthProvider authProvider}) : _authProvider = authProvider;
 
   @override
   State<TestPage> createState() => _TestPageState();
 }
 
 class _TestPageState extends State<TestPage> {
-  final List<_Question> _questions = _sampleQuestions;
-  late List<int?> _selectedOptions;
-  late List<bool> _flagged;
-  int _currentQuestion = 0;
+  final _db = DatabaseHelperTests.instance;
+  final _dbOptions = DatabaseHelperOptions.instance;
+  late final QuestionsProvider api;
+  List<QuestionModel> results = [];
 
-  @override
-  void initState() {
-    super.initState();
-    _selectedOptions = List<int?>.filled(_questions.length, null);
-    _flagged = List<bool>.filled(_questions.length, false);
-  }
 
-  @override
-  Widget build(BuildContext context) {
-    final question = _questions[_currentQuestion];
-    final answeredCount =
-        _selectedOptions.where((value) => value != null).length;
-    final progress = (_currentQuestion + 1) / _questions.length;
-
-    return PopScope(
-      canPop: false,
-      onPopInvokedWithResult: (didPop, _) async {
-        if (didPop) return;
-        await _confirmExit(context);
-      },
-      child: Scaffold(
-        appBar: AppBar(
-          leading: IconButton(
-            icon: const Icon(Icons.close),
-            onPressed: () => _confirmExit(context),
-          ),
-          title: Text(
-            'SAT Test 1 - ${question.section} - ${question.module}',
-            style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 16),
-          ),
-          actions: [
-            GestureDetector(
-              onTap: () {},
-              child: Container(
-                margin: const EdgeInsets.only(right: 14),
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                decoration: BoxDecoration(
-                  color: const Color(0xFFE8EDFF),
-                  borderRadius: BorderRadius.circular(14),
-                ),
-                child: const Row(
-                  children: [
-                    Icon(Icons.timer_outlined, color: Color(0xFF2557D6)),
-                    SizedBox(width: 6),
-                    Text(
-                      '23:17',
-                      style: TextStyle(
-                        fontWeight: FontWeight.w700,
-                        color: Color(0xFF2557D6),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-          ],
-        ),
-        body: Column(
-          children: [
-            Padding(
-              padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    children: [
-                      Text(
-                        'Question ${_currentQuestion + 1} of ${_questions.length}',
-                        style: const TextStyle(
-                          fontWeight: FontWeight.w700,
-                        ),
-                      ),
-                      const Spacer(),
-                      Text(
-                        '$answeredCount answered',
-                        style: const TextStyle(color: Color(0xFF475569)),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 6),
-                  LinearProgressIndicator(
-                    value: progress,
-                    minHeight: 8,
-                    borderRadius: BorderRadius.circular(10),
-                    backgroundColor: const Color(0xFFE2E8F0),
-                    color: const Color(0xFF2557D6),
-                  ),
-                ],
-              ),
-            ),
-            Expanded(
-              child: SingleChildScrollView(
-                padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    if (question.passage != null) ...[
-                      Container(
-                        width: double.infinity,
-                        padding: const EdgeInsets.all(14),
-                        decoration: BoxDecoration(
-                          color: const Color(0xFFF8FAFC),
-                          borderRadius: BorderRadius.circular(14),
-                          border: Border.all(color: const Color(0xFFE2E8F0)),
-                        ),
-                        child: Text(
-                          question.passage!,
-                          style: const TextStyle(height: 1.4),
-                        ),
-                      ),
-                      const SizedBox(height: 12),
-                    ],
-                    Text(
-                      question.prompt,
-                      style: const TextStyle(
-                        fontSize: 16,
-                        fontWeight: FontWeight.w700,
-                      ),
-                    ),
-                    const SizedBox(height: 12),
-                    ...List.generate(
-                      question.options.length,
-                      (index) => _AnswerOption(
-                        label: String.fromCharCode(65 + index),
-                        text: question.options[index],
-                        isSelected: _selectedOptions[_currentQuestion] == index,
-                        onTap: () => _selectOption(index),
-                      ),
-                    ),
-                    const SizedBox(height: 10),
-                    _Toolbar(
-                      flagged: _flagged[_currentQuestion],
-                      onFlag: () => _toggleFlag(_currentQuestion),
-                      onNotes: _showNotes,
-                      onCalculator: () {},
-                      onTextSize: () {},
-                    ),
-                    const SizedBox(height: 10),
-                    Align(
-                      alignment: Alignment.centerRight,
-                      child: TextButton.icon(
-                        onPressed: () => _confirmEndModule(context),
-                        icon: const Icon(Icons.exit_to_app),
-                        label: const Text('End module'),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-            Container(
-              padding: const EdgeInsets.all(12),
-              decoration: const BoxDecoration(
-                color: Colors.white,
-                boxShadow: [
-                  BoxShadow(
-                    color: Color(0x1A000000),
-                    blurRadius: 10,
-                    offset: Offset(0, -2),
-                  ),
-                ],
-              ),
-              child: Row(
-                children: [
-                  Expanded(
-                    child: OutlinedButton(
-                      onPressed: _currentQuestion == 0
-                          ? null
-                          : () => _goToQuestion(_currentQuestion - 1),
-                      child: const Text('Previous'),
-                    ),
-                  ),
-                  const SizedBox(width: 10),
-                  IconButton.filledTonal(
-                    onPressed: _openQuestionList,
-                    icon: const Icon(Icons.grid_view),
-                  ),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: ElevatedButton(
-                      onPressed: _currentQuestion == _questions.length - 1
-                          ? null
-                          : () => _goToQuestion(_currentQuestion + 1),
-                      child: const Text('Next'),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  void _selectOption(int index) {
-    setState(() {
-      _selectedOptions[_currentQuestion] = index;
-    });
+  Future<void> _loadResults() async {
+    
+    try {
+      results = [];
+      final data = await _db.getTestsById(widget.id);
+      for (var element in data) {
+        final List<Map<String, dynamic>> dataOptions = await _dbOptions.getResultsbyQId(element['question_id']);
+        List<OptionModel> options = [];
+        for (var e in dataOptions) {
+          OptionModel option = OptionModel(
+            id: e['id'],
+            text: e['option_text'],
+            isCorrect: e['is_correct'] == 1,
+            image: e['image'],);
+          options.add(option);
+        }
+        
+        QuestionModel question = QuestionModel(
+          id: element['question_id'],
+          questionText: element['question_text'],
+          image: element['image'],
+          score: element['score'],
+          questionType: element['question_type'],
+          section: element['section'],
+          options: options,
+        );
+        
+        results.add(question);
+        
+      }
+    }
+    catch (e) {
+      print('Error loading results: $e');
+      await api.loadQuestions(widget.id);
+      results = api.questions;
+    }
+    finally {
+      setState(() {});
+    }
+    
   }
 
   void _toggleFlag(int index) {
@@ -438,33 +284,10 @@ class _Toolbar extends StatelessWidget {
   final VoidCallback onTextSize;
 
   @override
-  Widget build(BuildContext context) {
-    return Row(
-      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-      children: [
-        _ToolbarButton(
-          icon: flagged ? Icons.flag : Icons.flag_outlined,
-          label: 'Flag',
-          onTap: onFlag,
-          active: flagged,
-        ),
-        _ToolbarButton(
-          icon: Icons.edit_note_outlined,
-          label: 'Notepad',
-          onTap: onNotes,
-        ),
-        _ToolbarButton(
-          icon: Icons.calculate_outlined,
-          label: 'Calculator',
-          onTap: onCalculator,
-        ),
-        _ToolbarButton(
-          icon: Icons.text_increase,
-          label: 'Font size',
-          onTap: onTextSize,
-        ),
-      ],
-    );
+  void initState() {
+    super.initState();
+    api = QuestionsProvider(widget._authProvider);
+    _loadResults();
   }
 }
 
