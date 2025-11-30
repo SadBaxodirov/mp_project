@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../router.dart';
+import '../../utils/DB_tests.dart';
 import '../../widgets/main_navigation_bar.dart';
 
 class TestList extends StatefulWidget {
@@ -12,20 +13,62 @@ class TestList extends StatefulWidget {
 
 class _TestListState extends State<TestList> {
   final _db = DatabaseHelperTests.instance;
-  List<Map<String, dynamic>> results = [];
+  final _searchController = TextEditingController();
+
+  List<Map<String, dynamic>> _savedTests = [];
+  String _selectedFilter = _filters.first;
+
+  @override
+  void dispose() {
+    _searchController.dispose();
+    super.dispose();
+  }
 
   Future<void> _loadTests() async {
-    final data = await _db.getTests();
-    setState(() {
-      results = data;
-    });
-    
+    try {
+      final data = await _db.getTests();
+      setState(() => _savedTests = data);
+    } catch (e) {
+      debugPrint('Error loading saved tests: $e');
+    }
   }
 
   @override
   void dispose() {
     _searchController.dispose();
     super.dispose();
+  }
+
+  List<_LibraryTest> get _availableTests {
+    final saved = _savedTests
+        .map(
+          (row) => _LibraryTest(
+            id: (row['test_id'] as num).toInt(),
+            title: 'Saved Test ${(row['test_id'] as num).toInt()}',
+            tagline: 'Resume a locally saved attempt.',
+            description: 'Loaded from offline storage on this device.',
+            duration: 'Unknown duration',
+            modules: 'Saved',
+            difficulty: 'Saved',
+            tags: const ['Saved'],
+            ctaLabel: 'Resume',
+          ),
+        )
+        .toList();
+    return [..._tests, ...saved];
+  }
+
+  List<_LibraryTest> get _filteredTests {
+    final query = _searchController.text.toLowerCase();
+    return _availableTests.where((test) {
+      final matchesFilter =
+          _selectedFilter == 'All' || test.tags.contains(_selectedFilter);
+      final matchesSearch = query.isEmpty ||
+          test.title.toLowerCase().contains(query) ||
+          test.description.toLowerCase().contains(query) ||
+          test.tagline.toLowerCase().contains(query);
+      return matchesFilter && matchesSearch;
+    }).toList();
   }
 
   @override
@@ -83,7 +126,7 @@ class _TestListState extends State<TestList> {
                       onStart: () => Navigator.pushNamed(
                         context,
                         AppRouter.test,
-                        arguments: const <int>[0],
+                        arguments: <int>[test.id ?? 0],
                       ),
                       onDetails: () => Navigator.pushNamed(
                         context,
@@ -154,7 +197,7 @@ class _PreviewHeroCard extends StatelessWidget {
               width: 54,
               height: 54,
               decoration: BoxDecoration(
-                color: Colors.white.withOpacity(0.15),
+                color: const Color(0x26FFFFFF),
                 borderRadius: BorderRadius.circular(14),
               ),
               child: const Icon(Icons.visibility, color: Colors.white),
@@ -318,6 +361,7 @@ class _LibraryTest {
     required this.modules,
     required this.difficulty,
     required this.tags,
+    this.id,
     this.lastTaken,
     this.ctaLabel = 'Start',
   });
@@ -329,14 +373,23 @@ class _LibraryTest {
   final String modules;
   final String difficulty;
   final List<String> tags;
+  final int? id;
   final String? lastTaken;
   final String ctaLabel;
 }
 
-const _filters = ['All', 'Reading & Writing', 'Math', 'Full Test', 'Preview'];
+const _filters = [
+  'All',
+  'Reading & Writing',
+  'Math',
+  'Full Test',
+  'Preview',
+  'Saved'
+];
 
 const _tests = <_LibraryTest>[
   _LibraryTest(
+    id: 1,
     title: 'Official SAT Practice Test 1',
     tagline: 'Full test - 2 modules - ~134 minutes',
     description:
@@ -349,6 +402,7 @@ const _tests = <_LibraryTest>[
     ctaLabel: 'Resume',
   ),
   _LibraryTest(
+    id: 2,
     title: 'Official SAT Practice Test 2',
     tagline: 'Full test - 2 modules - ~134 minutes',
     description: 'Great for a timed mock session with realistic pacing.',
@@ -359,6 +413,7 @@ const _tests = <_LibraryTest>[
     lastTaken: 'Not taken yet',
   ),
   _LibraryTest(
+    id: 3,
     title: 'Reading & Writing Skills Pack',
     tagline: 'RW focus - 1 module - 32 questions',
     description: 'Vocabulary, paired passages, and editing practice.',
@@ -368,6 +423,7 @@ const _tests = <_LibraryTest>[
     tags: ['Reading & Writing'],
   ),
   _LibraryTest(
+    id: 4,
     title: 'Math - Linear Equations Drill',
     tagline: 'Math focus - 1 module - 20 questions',
     description: 'Algebra-heavy practice with calculator allowed.',
@@ -377,6 +433,7 @@ const _tests = <_LibraryTest>[
     tags: ['Math'],
   ),
   _LibraryTest(
+    id: 5,
     title: 'Test Preview (Demo)',
     tagline: 'Preview - 1 short module',
     description: 'Quick untimed walkthrough of the digital SAT interface.',
