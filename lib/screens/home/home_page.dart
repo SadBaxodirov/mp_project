@@ -1,3 +1,5 @@
+import 'dart:typed_data';
+
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
@@ -5,6 +7,7 @@ import '../../core/api/test_api.dart';
 import '../../core/models/test.dart';
 import '../../features/auth/state/auth_provider.dart';
 import '../../router.dart';
+import '../../utils/profile_photo_store.dart';
 import '../../widgets/app_logo.dart';
 import '../../widgets/main_navigation_bar.dart';
 
@@ -17,21 +20,43 @@ class HomePage extends StatefulWidget {
 
 class _HomePageState extends State<HomePage> {
   final _testApi = TestApi();
+  final _photoStore = ProfilePhotoStore.instance;
+  Uint8List? _photoBytes;
   late Future<List<Test>> _testsFuture;
 
   @override
   void initState() {
     super.initState();
     _testsFuture = _loadTests();
+    _loadProfilePhoto();
   }
 
   Future<List<Test>> _loadTests() => _testApi.getTests();
+
+  Future<void> _loadProfilePhoto() async {
+    final userId = context.read<AuthProvider>().currentUser?.id;
+    if (userId == null) {
+      if (_photoBytes != null) {
+        setState(() => _photoBytes = null);
+      }
+      return;
+    }
+
+    try {
+      final bytes = await _photoStore.loadPhoto(userId);
+      if (!mounted) return;
+      setState(() => _photoBytes = bytes);
+    } catch (e) {
+      debugPrint('Error loading profile photo: $e');
+    }
+  }
 
   Future<void> _reload() async {
     setState(() {
       _testsFuture = _loadTests();
     });
     await _testsFuture;
+    await _loadProfilePhoto();
   }
 
   String _initials(String? name) {
@@ -70,19 +95,26 @@ class _HomePageState extends State<HomePage> {
           ),
           actions: [
             GestureDetector(
-              onTap: () => Navigator.pushNamed(context, AppRouter.profile),
+              onTap: () async {
+                await Navigator.pushNamed(context, AppRouter.profile);
+                await _loadProfilePhoto();
+              },
               child: Padding(
                 padding: const EdgeInsets.only(right: 16),
                 child: CircleAvatar(
                   radius: 18,
                   backgroundColor: const Color(0xFFE5ECFF),
-                  child: Text(
+                  backgroundImage:
+                  _photoBytes != null ? MemoryImage(_photoBytes!) : null,
+                  child: _photoBytes == null
+                      ? Text(
                     _initials(greetingName),
                     style: const TextStyle(
                       color: Color(0xFF2557D6),
                       fontWeight: FontWeight.w700,
                     ),
-                  ),
+                  )
+                      : null,
                 ),
               ),
             ),

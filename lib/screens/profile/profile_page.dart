@@ -129,13 +129,11 @@ class _ProfilePageState extends State<ProfilePage> {
 
     try {
       await context.read<AuthProvider>().updateProfile(
-        username: updatedFields.username,
         firstName: updatedFields.firstName,
         lastName: updatedFields.lastName,
         school: updatedFields.school,
         grade: updatedFields.grade,
         phoneNumber: updatedFields.phoneNumber,
-        email: updatedFields.email,
       );
       await context.read<AuthProvider>().refreshCurrentUser();
       await _loadProfileDetails();
@@ -474,9 +472,9 @@ class _ProfileHeader extends StatelessWidget {
                         borderRadius: BorderRadius.circular(12),
                         border: Border.all(color: Colors.white30),
                       ),
-                      child: Row(
+                      child: const Row(
                         mainAxisSize: MainAxisSize.min,
-                        children: const [
+                        children: [
                           Icon(Icons.edit, size: 16, color: Colors.white),
                           SizedBox(width: 6),
                           Text(
@@ -870,22 +868,18 @@ class _ProfileStats {
 
 class _EditResult {
   const _EditResult({
-    required this.username,
     required this.firstName,
     required this.lastName,
     required this.school,
     required this.grade,
     required this.phoneNumber,
-    required this.email,
   });
 
-  final String username;
   final String firstName;
   final String lastName;
   final String school;
   final String grade;
   final String phoneNumber;
-  final String email;
 }
 
 class _EditProfileSheet extends StatefulWidget {
@@ -900,7 +894,6 @@ class _EditProfileSheet extends StatefulWidget {
 class _EditProfileSheetState extends State<_EditProfileSheet> {
   final _formKey = GlobalKey<FormState>();
 
-  late final TextEditingController _username;
   late final TextEditingController _firstName;
   late final TextEditingController _lastName;
   late final TextEditingController _school;
@@ -912,7 +905,6 @@ class _EditProfileSheetState extends State<_EditProfileSheet> {
   @override
   void initState() {
     super.initState();
-    _username = TextEditingController(text: widget.user.username);
     _firstName = TextEditingController(text: widget.user.firstName);
     _lastName = TextEditingController(text: widget.user.lastName ?? '');
     _school = TextEditingController(text: widget.user.school ?? '');
@@ -923,7 +915,6 @@ class _EditProfileSheetState extends State<_EditProfileSheet> {
 
   @override
   void dispose() {
-    _username.dispose();
     _firstName.dispose();
     _lastName.dispose();
     _school.dispose();
@@ -937,13 +928,11 @@ class _EditProfileSheetState extends State<_EditProfileSheet> {
     if (!_formKey.currentState!.validate()) return;
     setState(() => _saving = true);
     final result = _EditResult(
-      username: _username.text.trim(),
       firstName: _firstName.text.trim(),
       lastName: _lastName.text.trim(),
       school: _school.text.trim(),
       grade: _grade.text.trim(),
       phoneNumber: _phone.text.trim(),
-      email: _email.text.trim(),
     );
     Navigator.of(context).pop(result);
   }
@@ -983,12 +972,6 @@ class _EditProfileSheetState extends State<_EditProfileSheet> {
                   ),
                   const SizedBox(height: 12),
                   _Field(
-                    controller: _username,
-                    label: 'Username',
-                    validator: (v) =>
-                    v == null || v.isEmpty ? 'Required' : null,
-                  ),
-                  _Field(
                     controller: _firstName,
                     label: 'First name',
                     validator: (v) =>
@@ -1013,10 +996,10 @@ class _EditProfileSheetState extends State<_EditProfileSheet> {
                   ),
                   _Field(
                     controller: _email,
-                    label: 'Email',
+                    label: 'Email (read only)',
                     keyboardType: TextInputType.emailAddress,
-                    validator: (v) =>
-                    v == null || v.isEmpty ? 'Required' : null,
+                    enabled: false,
+                    readOnly: true,
                   ),
                   const SizedBox(height: 12),
                   SizedBox(
@@ -1051,12 +1034,16 @@ class _Field extends StatelessWidget {
     required this.label,
     this.validator,
     this.keyboardType,
+    this.enabled = true,
+    this.readOnly = false,
   });
 
   final TextEditingController controller;
   final String label;
   final String? Function(String?)? validator;
   final TextInputType? keyboardType;
+  final bool enabled;
+  final bool readOnly;
 
   @override
   Widget build(BuildContext context) {
@@ -1067,6 +1054,8 @@ class _Field extends StatelessWidget {
         decoration: InputDecoration(labelText: label),
         validator: validator,
         keyboardType: keyboardType,
+        enabled: enabled,
+        readOnly: readOnly,
       ),
     );
   }
