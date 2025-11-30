@@ -49,7 +49,7 @@ class _ProfilePageState extends State<ProfilePage> {
       Navigator.pushNamedAndRemoveUntil(
         context,
         AppRouter.login,
-        (route) => false,
+            (route) => false,
       );
     }
   }
@@ -129,14 +129,14 @@ class _ProfilePageState extends State<ProfilePage> {
 
     try {
       await context.read<AuthProvider>().updateProfile(
-            username: updatedFields.username,
-            firstName: updatedFields.firstName,
-            lastName: updatedFields.lastName,
-            school: updatedFields.school,
-            grade: updatedFields.grade,
-            phoneNumber: updatedFields.phoneNumber,
-            email: updatedFields.email,
-          );
+        username: updatedFields.username,
+        firstName: updatedFields.firstName,
+        lastName: updatedFields.lastName,
+        school: updatedFields.school,
+        grade: updatedFields.grade,
+        phoneNumber: updatedFields.phoneNumber,
+        email: updatedFields.email,
+      );
       await context.read<AuthProvider>().refreshCurrentUser();
       await _loadProfileDetails();
       _showSnack('Profile updated.');
@@ -183,9 +183,9 @@ class _ProfilePageState extends State<ProfilePage> {
     }
 
     final latest =
-        tests.map((t) => t.createdAt).reduce((a, b) => a.isAfter(b) ? a : b);
+    tests.map((t) => t.createdAt).reduce((a, b) => a.isAfter(b) ? a : b);
     final totalSum =
-        tests.fold<double>(0, (sum, t) => sum + t.mathScore + t.englishScore);
+    tests.fold<double>(0, (sum, t) => sum + t.mathScore + t.englishScore);
     final mathSum = tests.fold<double>(0, (sum, t) => sum + t.mathScore);
     final englishSum = tests.fold<double>(0, (sum, t) => sum + t.englishScore);
     final count = tests.length.toDouble();
@@ -397,13 +397,13 @@ class _ProfileHeader extends StatelessWidget {
                               : null,
                           child: photoBytes == null
                               ? Text(
-                                  initials,
-                                  style: const TextStyle(
-                                    fontSize: 24,
-                                    fontWeight: FontWeight.w800,
-                                    color: Color(0xFF2557D6),
-                                  ),
-                                )
+                            initials,
+                            style: const TextStyle(
+                              fontSize: 24,
+                              fontWeight: FontWeight.w800,
+                              color: Color(0xFF2557D6),
+                            ),
+                          )
                               : null,
                         ),
                         Positioned(
@@ -986,13 +986,13 @@ class _EditProfileSheetState extends State<_EditProfileSheet> {
                     controller: _username,
                     label: 'Username',
                     validator: (v) =>
-                        v == null || v.isEmpty ? 'Required' : null,
+                    v == null || v.isEmpty ? 'Required' : null,
                   ),
                   _Field(
                     controller: _firstName,
                     label: 'First name',
                     validator: (v) =>
-                        v == null || v.isEmpty ? 'Required' : null,
+                    v == null || v.isEmpty ? 'Required' : null,
                   ),
                   _Field(
                     controller: _lastName,
@@ -1016,7 +1016,7 @@ class _EditProfileSheetState extends State<_EditProfileSheet> {
                     label: 'Email',
                     keyboardType: TextInputType.emailAddress,
                     validator: (v) =>
-                        v == null || v.isEmpty ? 'Required' : null,
+                    v == null || v.isEmpty ? 'Required' : null,
                   ),
                   const SizedBox(height: 12),
                   SizedBox(
@@ -1025,13 +1025,13 @@ class _EditProfileSheetState extends State<_EditProfileSheet> {
                       onPressed: _saving ? null : _submit,
                       child: _saving
                           ? const SizedBox(
-                              height: 18,
-                              width: 18,
-                              child: CircularProgressIndicator(
-                                strokeWidth: 2,
-                                color: Colors.white,
-                              ),
-                            )
+                        height: 18,
+                        width: 18,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2,
+                          color: Colors.white,
+                        ),
+                      )
                           : const Text('Save changes'),
                     ),
                   ),
