@@ -1,14 +1,14 @@
 import 'package:flutter/material.dart';
 
 import '../../../core/api/token_storage.dart';
-import '../data/auth_api.dart';
-import '../data/models/auth_tokens.dart';
-import '../data/models/user.dart';
+import '../../../core/api/user_api.dart';
+import '../../../core/models/auth_tokens.dart';
+import '../../../core/models/user.dart';
 
 class AuthProvider extends ChangeNotifier {
-  AuthProvider(this._authApi);
+  AuthProvider(this._userApi);
 
-  final AuthApi _authApi;
+  final UserApi _userApi;
 
   User? currentUser;
   String? accessToken;
@@ -18,7 +18,9 @@ class AuthProvider extends ChangeNotifier {
   bool _isInitializing = true;
 
   bool get isLoading => _isLoading;
+
   bool get isInitializing => _isInitializing;
+
   bool get isLoggedIn => accessToken != null && accessToken!.isNotEmpty;
 
   Future<void> loadFromStorage() async {
@@ -26,7 +28,7 @@ class AuthProvider extends ChangeNotifier {
     refreshToken = await TokenStorage.getRefresh();
     if (isLoggedIn) {
       try {
-        currentUser = await _authApi.getCurrentUser();
+        currentUser = await _userApi.getCurrentUser();
       } catch (_) {
         await logout();
       }
@@ -35,25 +37,34 @@ class AuthProvider extends ChangeNotifier {
     notifyListeners();
   }
 
-  Future<void> login(String email, String password) async {
+  Future<void> login(String username, String password) async {
     await _withLoader(() async {
-      final tokens = await _authApi.login(email: email, password: password);
+      final tokens = await _userApi.login(username: username, password: password);
       await _saveTokens(tokens);
-      currentUser = await _authApi.getCurrentUser();
+      currentUser = await _userApi.getCurrentUser();
       notifyListeners();
     });
   }
 
-  Future<void> register(String fullName, String email, String password) async {
+  Future<void> register(String username, String firstName, String lastName,
+      String school, String grade,String phoneNumber, String email, String password) async {
     await _withLoader(() async {
-      await _authApi.register(
-        fullName: fullName,
-        email: email,
+      final newUser = User(
+          username: username,
+          firstName: firstName,
+          lastName: lastName,
+          school: school,
+          grade: grade,
+          phoneNumber: phoneNumber,
+          email: email);
+      await _userApi.register(
+        user: newUser,
         password: password,
       );
-      final tokens = await _authApi.login(email: email, password: password);
+      final tokens =
+          await _userApi.login(username: username, password: password);
       await _saveTokens(tokens);
-      currentUser = await _authApi.getCurrentUser();
+      currentUser = await _userApi.getCurrentUser();
       notifyListeners();
     });
   }
