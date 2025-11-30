@@ -19,9 +19,9 @@ class _TestListState extends State<TestList> {
   String _selectedFilter = _filters.first;
 
   @override
-  void initState() {
-    super.initState();
-    _loadTests();
+  void dispose() {
+    _searchController.dispose();
+    super.dispose();
   }
 
   Future<void> _loadTests() async {

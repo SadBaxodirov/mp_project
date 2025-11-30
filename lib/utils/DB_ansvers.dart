@@ -24,56 +24,44 @@ class DatabaseHelper {
     );
   }
 
-//start_time YYYY-MM-DD HH:MM:SS
   Future _createDBresult(Database db, int version) async {
     await db.execute('''
-    CREATE TABLE IF NOT EXISTS results  (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      test_id INTEGER,
-      question_id INTEGER,
-      right_answer TEXT,
-      user_answer TEXT,
-      score FLOAT,
-      start_time TEXT,
-      FOREIGN KEY (test_id) REFERENCES tests(test_id),
-      FOREIGN KEY (question_id) REFERENCES questions(question_id)
+    CREATE TABLE IF NOT EXISTS user_answers (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_test_id    INTEGER NOT NULL,
+    question_id     INTEGER NOT NULL,
+    selected_option_id INTEGER,
+    is_correct      INTEGER NOT NULL CHECK (is_correct IN (0,1))),
+    FOREIGN KEY (user_test_id) REFERENCES tests(test_id),
+    FOREIGN KEY (question_id) REFERENCES tests(question_id);
     )
     ''');
   }
 
 //results methods
-  Future<List<Map<String, dynamic>>> getResultsbyTime(String time) async {
+  Future<List<Map<String, dynamic>>> getResultsbyId(String id) async {
     final db = await instance.database;
-    return await db.query('results', where: 'start_time = ?', whereArgs: [time]);
+    return await db.query('user_answers', where: 'question_id = ?', whereArgs: [id]);
   }
 
   Future<void> insertResult(Map<String, dynamic> result) async {
     final db = await instance.database;
-    await db.insert('results', result);
+    await db.insert('user_answers', result);
   }
 
-  Future<List<Map<String, dynamic>>> getResults() async {
+  Future<List<Map<String, dynamic>>> getAll() async {
     final db = await instance.database;
-    return await db.query('results', orderBy: 'start_time DESC');
+    return await db.query('user_answers', orderBy: 'question_id DESC');
   }
 
-  Future<List<Map<String, dynamic>>> getResultsSums() async {
+  Future<void> deleteResultsById(String id) async {
     final db = await instance.database;
-
-    final result = await db.rawQuery(
-    '''
-    SELECT SUM(Score) as total_score, start_time
-    FROM results
-    GROUP BY start_timec
-    '''
-  );
-    
-    return result;
+    await db.delete('user_answers', where: 'question_id = ?', whereArgs: [id]);
   }
 
-  Future<void> deleteResultsByTime(String time) async {
+  Future<void> deleteResults() async {
     final db = await instance.database;
-    await db.delete('results', where: 'start_time = ?', whereArgs: [time]);
+    await db.delete('user_answers');
   }
 
   Future close() async {

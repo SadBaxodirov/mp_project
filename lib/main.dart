@@ -2,13 +2,13 @@ import 'package:flutter/material.dart';
 
 import 'package:provider/provider.dart';
 import 'router.dart';
-import 'features/auth/data/auth_api.dart';
+import 'core/api/user_api.dart';
 import 'features/auth/state/auth_provider.dart';
 import 'theme/app_theme.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  final authProvider = AuthProvider(AuthApi());
+  final authProvider = AuthProvider(UserApi());
   await authProvider.loadFromStorage();
 
   runApp(
