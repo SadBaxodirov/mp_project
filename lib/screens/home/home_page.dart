@@ -609,11 +609,11 @@ class _ProgressSummary extends StatelessWidget {
                 mainAxisAlignment: MainAxisAlignment.spaceEvenly,
                 children: _progressStats
                     .map((stat) => _CircularStat(
-                          label: stat.label,
-                          value: stat.value,
-                          tests: stat.tests,
-                          color: stat.color,
-                        ))
+                  label: stat.label,
+                  value: stat.value,
+                  tests: stat.tests,
+                  color: stat.color,
+                ))
                     .toList(),
               ),
             ),
