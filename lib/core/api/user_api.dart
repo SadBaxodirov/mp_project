@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'api_client.dart';
 import 'api_constants.dart';
+import 'package:http/http.dart' as http;
 
 import '../models/user.dart';
 import '../models/auth_tokens.dart';
@@ -21,11 +22,14 @@ class UserApi {
   UserApi() : client = ApiClient(apiBaseUrl);
 
   /// Login → returns access + refresh tokens
-  Future<AuthTokens> login({required String username, required String password}) async {
-    final response = await client.post('/token/', {"username": username, "password": password});
+  Future<AuthTokens> login(
+      {required String username, required String password}) async {
+    final response = await client
+        .post('/token/', {"username": username, "password": password});
 
     if (response.statusCode != 200) {
-      throw Exception(_errorFromResponse(response.body, fallback: "Login failed"));
+      throw Exception(
+          _errorFromResponse(response.body, fallback: "Login failed"));
     }
 
     final data = jsonDecode(response.body) as Map<String, dynamic>;
@@ -38,11 +42,11 @@ class UserApi {
       "password": password,
     };
     //create user
-    final response = await client.post(
-      '/user/register/', payload);
+    final response = await client.post('/user/register/', payload);
 
     if (response.statusCode != 201 && response.statusCode != 200) {
-      throw Exception(_errorFromResponse(response.body, fallback: "Registration failed"));
+      throw Exception(
+          _errorFromResponse(response.body, fallback: "Registration failed"));
     }
     return true;
   }
@@ -52,6 +56,42 @@ class UserApi {
 
     if (response.statusCode != 200) {
       throw Exception("Failed to load current user");
+    }
+
+    final data = jsonDecode(response.body) as Map<String, dynamic>;
+    return User.fromJson(data);
+  }
+
+  Future<User> updateCurrentUser({
+    String? username,
+    String? firstName,
+    String? lastName,
+    String? school,
+    String? grade,
+    String? phoneNumber,
+    String? email,
+    required User existing,
+  }) async {
+    final payload = <String, dynamic>{
+      "username": username ?? existing.username,
+      "first_name": firstName ?? existing.firstName,
+      "last_name": lastName ?? existing.lastName,
+      "school": school ?? existing.school,
+      "grade": grade ?? existing.grade,
+      "phone_number": phoneNumber ?? existing.phoneNumber,
+      "email": email ?? existing.email,
+    };
+
+    http.Response response = await client.patch('/user/me/', payload);
+
+    if (response.statusCode != 200) {
+      response = await client.put('/user/me/', payload);
+    }
+
+    if (response.statusCode != 200) {
+      throw Exception(
+        _errorFromResponse(response.body, fallback: "Profile update failed"),
+      );
     }
 
     final data = jsonDecode(response.body) as Map<String, dynamic>;

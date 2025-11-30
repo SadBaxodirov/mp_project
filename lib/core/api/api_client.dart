@@ -39,6 +39,42 @@ class ApiClient {
     });
   }
 
+  Future<http.Response> patch(String endpoint, Map body) {
+    return _sendRequest((token) {
+      final uri = Uri.parse(baseUrl + endpoint);
+
+      final headers = <String, String>{
+        'Content-Type': 'application/json',
+        'Accept': 'application/json',
+        if (token != null && token.isNotEmpty) 'Authorization': 'Bearer $token',
+      };
+
+      return http.patch(
+        uri,
+        headers: headers,
+        body: jsonEncode(body),
+      );
+    });
+  }
+
+  Future<http.Response> put(String endpoint, Map body) {
+    return _sendRequest((token) {
+      final uri = Uri.parse(baseUrl + endpoint);
+
+      final headers = <String, String>{
+        'Content-Type': 'application/json',
+        'Accept': 'application/json',
+        if (token != null && token.isNotEmpty) 'Authorization': 'Bearer $token',
+      };
+
+      return http.put(
+        uri,
+        headers: headers,
+        body: jsonEncode(body),
+      );
+    });
+  }
+
   Future<http.Response> delete(String endpoint) {
     return _sendRequest((token) {
       final uri = Uri.parse(baseUrl + endpoint);
