@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
@@ -6,12 +7,22 @@ import '../../features/auth/state/auth_provider.dart';
 import '../../features/test/data/models/test_model.dart';
 import '../../features/test/state/test_provider.dart';
 import '../../router.dart';
-import '../../utils/DB_ansvers.dart';
+import '../../utils/DB_answers.dart';
+import '../../utils/DB_tests.dart';
 
 class TestPage extends StatefulWidget {
-  const TestPage({super.key, required this.testList});
+  const TestPage({
+    super.key,
+    required this.testId,
+    this.resumeUserTestId,
+    this.resumeAnswers,
+    this.resumeSectionIndex = 0,
+  });
 
-  final List<int> testList;
+  final int testId;
+  final int? resumeUserTestId;
+  final Map<int, int?>? resumeAnswers;
+  final int resumeSectionIndex;
 
   @override
   State<TestPage> createState() => _TestPageState();
@@ -22,23 +33,59 @@ class _TestPageState extends State<TestPage> {
 
   late final QuestionsProvider _questionsProvider;
   final DatabaseHelper _answersDb = DatabaseHelper.instance;
+  final DatabaseHelperTests _testsDb = DatabaseHelperTests.instance;
   final TestApi _testApi = TestApi();
   final PageController _pageController = PageController();
 
   int _currentQuestion = 0;
-  int _currentSectionIndex = 0;
+  late int _currentSectionIndex;
   double _textScale = 1.0;
   bool _initializing = true;
   String? _error;
   List<bool> _flagged = [];
-
-  int get _testId => widget.testList.isNotEmpty ? widget.testList.first : 0;
+  final Map<int, int?> _resumeAnswers = {};
 
   @override
   void initState() {
     super.initState();
+    _currentSectionIndex = widget.resumeSectionIndex;
     _questionsProvider = QuestionsProvider(context.read<AuthProvider>());
+    if (widget.resumeAnswers != null) {
+      _resumeAnswers.addAll(widget.resumeAnswers!);
+    }
     _initTest();
+  }
+
+  Future<void> _cacheQuestions(
+    String sectionId,
+    List<QuestionModel> questions,
+  ) async {
+    for (final q in questions) {
+      await _testsDb.insertTest({
+        'test_id': widget.testId,
+        'question_id': q.id,
+        'question_text': q.questionText,
+        'image': q.image,
+        'score': q.score,
+        'question_type': q.questionType,
+        'section': sectionId,
+        'ansver': null,
+      });
+    }
+  }
+
+  Future<void> _saveAnswer(QuestionModel question, int optionId) async {
+    if (kIsWeb) return;
+    final userTestId = _questionsProvider.userTestId;
+    if (userTestId == null) return;
+    final isCorrect = question.options
+        .any((option) => option.id == optionId && option.isCorrect);
+    await _answersDb.upsertResult({
+      'user_test_id': userTestId,
+      'question_id': question.id,
+      'selected_option_id': optionId,
+      'is_correct': isCorrect ? 1 : 0,
+    });
   }
 
   @override
@@ -55,7 +102,11 @@ class _TestPageState extends State<TestPage> {
     });
 
     try {
-      await _questionsProvider.createUserTest(testId: _testId);
+      if (widget.resumeUserTestId != null) {
+        _questionsProvider.userTestId = widget.resumeUserTestId;
+      } else {
+        await _questionsProvider.createUserTest(testId: widget.testId);
+      }
       await _loadSection();
     } catch (e) {
       setState(() => _error = e.toString());
@@ -76,12 +127,18 @@ class _TestPageState extends State<TestPage> {
     try {
       final sectionId = _sections[_currentSectionIndex];
       await _questionsProvider.loadSection(
-        testId: _testId,
+        testId: widget.testId,
         sectionId: sectionId,
       );
 
       final questions = _questionsProvider.questionsForSection(sectionId);
       _flagged = List<bool>.filled(questions.length, false);
+
+      // Cache questions locally for resume.
+      await _cacheQuestions(sectionId, questions);
+
+      // Apply any resumed answers for this section.
+      await _loadSavedAnswersIntoProvider(sectionId, questions);
 
       if (_pageController.hasClients) {
         _pageController.jumpToPage(0);
@@ -101,9 +158,35 @@ class _TestPageState extends State<TestPage> {
     }
   }
 
+  Future<void> _loadSavedAnswersIntoProvider(
+    String sectionId,
+    List<QuestionModel> questions,
+  ) async {
+    if (_resumeAnswers.isEmpty && !kIsWeb) {
+      final userTestId = _questionsProvider.userTestId;
+      if (userTestId != null) {
+        final stored = await _answersDb.getByUserTestId(userTestId);
+        for (final row in stored) {
+          _resumeAnswers[row['question_id'] as int] =
+              row['selected_option_id'] as int?;
+        }
+      }
+    }
+
+    if (_resumeAnswers.isEmpty) return;
+
+    for (final q in questions) {
+      final answered = _resumeAnswers[q.id];
+      if (answered != null) {
+        _questionsProvider.selectAnswer(q.id, answered);
+      }
+    }
+  }
+
   void _selectOption(QuestionModel question, int optionId) {
     _questionsProvider.selectAnswer(question.id, optionId);
     setState(() {});
+    _saveAnswer(question, optionId);
   }
 
   void _toggleFlag(int index) {
@@ -257,7 +340,7 @@ class _TestPageState extends State<TestPage> {
     } else if (launchedFromLastQuestion &&
         selectedIndex == null &&
         isLastSection) {
-      // fallback: if we came from last question and user backed out, stay put
+      // no-op fallback
     }
   }
 
@@ -341,6 +424,10 @@ class _TestPageState extends State<TestPage> {
   }
 
   Future<void> _persistSectionAnswers() async {
+    if (kIsWeb) {
+      // Skip local persistence on web (avoids wasm init issues).
+      return;
+    }
     final userTestId = _questionsProvider.userTestId;
     if (userTestId == null) return;
 
@@ -348,7 +435,7 @@ class _TestPageState extends State<TestPage> {
     final answers = _questionsProvider.answersForSection(sectionId);
 
     for (final answer in answers) {
-      await _answersDb.insertResult({
+      await _answersDb.upsertResult({
         'user_test_id': userTestId,
         'question_id': answer['question_id'],
         'selected_option_id': answer['selected_option_id'],
@@ -371,11 +458,25 @@ class _TestPageState extends State<TestPage> {
     final isLastSection = _currentSectionIndex == _sections.length - 1;
     if (isLastSection) {
       final userTestId = _questionsProvider.userTestId;
-      if (userTestId != null) {
-        await _testApi.submitAnswers(
-          userTestId: userTestId,
-          answers: _gatherAllAnswers(),
+      final answers = _gatherAllAnswers();
+      if (userTestId != null && answers.isNotEmpty) {
+        try {
+          await _testApi.submitAnswers(
+            userTestId: userTestId,
+            answers: answers,
+          );
+        } catch (e) {
+          if (!mounted) return;
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('Submit failed: $e')),
+          );
+          return;
+        }
+      } else if (answers.isEmpty && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('No answers to submit.')),
         );
+        return;
       }
       if (!mounted) return;
       Navigator.pushReplacementNamed(context, AppRouter.results);

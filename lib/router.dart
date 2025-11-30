@@ -30,8 +30,22 @@ class AppRouter {
     testList: (_) => const TestList(),
     test: (context) {
       final args = ModalRoute.of(context)?.settings.arguments;
+      if (args is Map) {
+        final testId = args['testId'] as int? ?? 0;
+        final resumeAnswers =
+            (args['resumeAnswers'] as Map?)?.cast<int, int?>();
+        final resumeUserTestId = args['userTestId'] as int?;
+        final resumeSectionIndex = args['resumeSectionIndex'] as int? ?? 0;
+        return TestPage(
+          testId: testId,
+          resumeAnswers: resumeAnswers,
+          resumeUserTestId: resumeUserTestId,
+          resumeSectionIndex: resumeSectionIndex,
+        );
+      }
       final testIds = args is List<int> ? args : <int>[];
-      return TestPage(testList: testIds);
+      final testId = testIds.isNotEmpty ? testIds.first : 0;
+      return TestPage(testId: testId);
     },
     testPreviewInfo: (_) => const TestPreviewInfoScreen(),
     preparingTestPreview: (_) => const PreparingTestPreviewScreen(),

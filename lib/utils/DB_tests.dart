@@ -21,20 +21,24 @@ class DatabaseHelperTests {
       path,
       version: 1,
       onCreate: _createDBTest,
+      onOpen: (db) async {
+        await _createDBTest(db, 1);
+      },
     );
   }
 
   Future _createDBTest(Database db, int version) async {
     await db.execute('''
     CREATE TABLE IF NOT EXISTS tests (
-      test_id INTEGER PRIMARY ,
-      question_id INTEGER PRIMARY ,
+      test_id INTEGER NOT NULL,
+      question_id INTEGER NOT NULL,
       question_text TEXT,
       image TEXT,
-      score FLOAT,
+      score REAL,
       question_type TEXT,
       section TEXT,
-      ansver TEXT
+      ansver TEXT,
+      PRIMARY KEY (test_id, question_id)
     )
     ''');
   }
@@ -42,16 +46,18 @@ class DatabaseHelperTests {
 //tests methods
   Future<void> insertTest(Map<String, dynamic> test) async {
     final db = await instance.database;
-    await db.insert('tests', test);
+    await db.insert(
+      'tests',
+      test,
+      conflictAlgorithm: ConflictAlgorithm.replace,
+    );
   }
-
-  
 
   Future<List<Map<String, dynamic>>> getTests() async {
     final db = await instance.database;
-    return await db.rawQuery('SELECT DISTINCT test_id FROM tests ORDER BY test_id DESC');
-  } 
-
+    return await db
+        .rawQuery('SELECT DISTINCT test_id FROM tests ORDER BY test_id DESC');
+  }
 
   Future<List<Map<String, dynamic>>> getTestsById(int id) async {
     final db = await instance.database;
@@ -60,7 +66,8 @@ class DatabaseHelperTests {
 
   Future<List<Map<String, dynamic>>> getTestsByIdList(List<int> idList) async {
     final db = await instance.database;
-    return await db.query('tests', where: 'test_id IN (${idList.join(',')})', orderBy: 'id DESC');
+    return await db.query('tests',
+        where: 'test_id IN (${idList.join(',')})', orderBy: 'id DESC');
   }
 
   Future<void> updateTest(Map<String, dynamic> test) async {
@@ -79,4 +86,3 @@ class DatabaseHelperTests {
     db?.close();
   }
 }
-

@@ -2,11 +2,14 @@ import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../core/api/test_api.dart';
 import '../../core/models/test.dart';
 import '../../features/auth/state/auth_provider.dart';
 import '../../router.dart';
+import '../../utils/DB_answers.dart';
+import '../../utils/DB_tests.dart';
 import '../../utils/profile_photo_store.dart';
 import '../../widgets/app_logo.dart';
 import '../../widgets/main_navigation_bar.dart';
@@ -21,14 +24,23 @@ class HomePage extends StatefulWidget {
 class _HomePageState extends State<HomePage> {
   final _testApi = TestApi();
   final _photoStore = ProfilePhotoStore.instance;
+  final DatabaseHelper _answersDb = DatabaseHelper.instance;
+  final DatabaseHelperTests _testsDb = DatabaseHelperTests.instance;
+
   Uint8List? _photoBytes;
   late Future<List<Test>> _testsFuture;
+
+  // goal / progress state (from first version)
+  static const _goalPrefsKey = 'home_goal_score';
+  int _goalScore = 1400;
+  final int _bestScore = 1310;
 
   @override
   void initState() {
     super.initState();
     _testsFuture = _loadTests();
     _loadProfilePhoto();
+    _loadGoal();
   }
 
   Future<List<Test>> _loadTests() => _testApi.getTests();
@@ -57,6 +69,164 @@ class _HomePageState extends State<HomePage> {
     });
     await _testsFuture;
     await _loadProfilePhoto();
+  }
+
+  Future<void> _loadGoal() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final storedGoal = prefs.getInt(_goalPrefsKey);
+      if (storedGoal != null && mounted) {
+        setState(() => _goalScore = storedGoal);
+      }
+    } catch (e) {
+      debugPrint('Error loading goal: $e');
+    }
+  }
+
+  Future<void> _saveGoal(int goal) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setInt(_goalPrefsKey, goal);
+    } catch (e) {
+      debugPrint('Error saving goal: $e');
+    }
+  }
+
+  Future<void> _editGoal() async {
+    final controller = TextEditingController(text: '$_goalScore');
+    final newGoal = await showModalBottomSheet<int>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.white,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      builder: (context) {
+        final bottomInset = MediaQuery.of(context).viewInsets.bottom;
+        return Padding(
+          padding: EdgeInsets.fromLTRB(20, 24, 20, bottomInset + 20),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                'Set your goal',
+                style: TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+              const SizedBox(height: 8),
+              const Text(
+                'Pick a score to work toward. You can adjust this anytime.',
+                style: TextStyle(color: Color(0xFF475569)),
+              ),
+              const SizedBox(height: 16),
+              TextField(
+                controller: controller,
+                keyboardType: TextInputType.number,
+                decoration: const InputDecoration(
+                  labelText: 'Goal score',
+                  prefixIcon: Icon(Icons.flag_outlined),
+                ),
+              ),
+              const SizedBox(height: 16),
+              Row(
+                children: [
+                  Expanded(
+                    child: OutlinedButton(
+                      onPressed: () => Navigator.pop(context),
+                      child: const Text('Cancel'),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: ElevatedButton(
+                      onPressed: () {
+                        final parsed = int.tryParse(controller.text);
+                        if (parsed == null || parsed < 400 || parsed > 1600) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(
+                              content: Text(
+                                'Enter a score between 400 and 1600.',
+                              ),
+                            ),
+                          );
+                          return;
+                        }
+                        Navigator.pop(context, parsed);
+                      },
+                      child: const Text('Save goal'),
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        );
+      },
+    );
+
+    if (!mounted || newGoal == null) return;
+    setState(() => _goalScore = newGoal);
+    await _saveGoal(newGoal);
+  }
+
+  /// Resume latest test from local DB (from second version)
+  Future<void> _resumeLatestTest(BuildContext context) async {
+    final messenger = ScaffoldMessenger.of(context);
+    final answers = await _answersDb.getAll();
+    if (!mounted) return;
+
+    if (answers.isEmpty) {
+      messenger.showSnackBar(const SnackBar(
+        content: Text('No saved test to continue.'),
+      ));
+      return;
+    }
+
+    final latestUserTestId = answers.first['user_test_id'] as int;
+    final resumeAnswers = <int, int?>{};
+    for (final row in answers.where(
+          (e) => (e['user_test_id'] as int) == latestUserTestId,
+    )) {
+      resumeAnswers[row['question_id'] as int] =
+      row['selected_option_id'] as int?;
+    }
+
+    int testId = 0;
+    try {
+      final tests = await _testsDb.getTests();
+      if (tests.isNotEmpty) {
+        testId = (tests.first['test_id'] as num).toInt();
+      }
+    } catch (e) {
+      debugPrint('Error loading cached tests: $e');
+      messenger.showSnackBar(const SnackBar(
+        content: Text('Saved answers found, but no cached test metadata.'),
+      ));
+      return;
+    }
+
+    if (testId == 0) {
+      messenger.showSnackBar(const SnackBar(
+        content: Text('No cached test metadata to resume.'),
+      ));
+      return;
+    }
+
+    if (!context.mounted) return;
+
+    Navigator.pushNamed(
+      context,
+      AppRouter.test,
+      arguments: {
+        'testId': testId,
+        'userTestId': latestUserTestId,
+        'resumeAnswers': resumeAnswers,
+        'resumeSectionIndex': 0,
+      },
+    );
   }
 
   String _initials(String? name) {
@@ -188,14 +358,21 @@ class _HomePageState extends State<HomePage> {
                         height: 330,
                         child: TabBarView(
                           children: [
-                            _ActiveTestsTab(tests: activeTests),
+                            _ActiveTestsTab(
+                              tests: activeTests,
+                              onContinue: () => _resumeLatestTest(context),
+                            ),
                             const _ScheduledTestsTab(),
                             const _CompletedTestsTab(),
                           ],
                         ),
                       ),
                       const SizedBox(height: 16),
-                      const _ProgressSummary(),
+                      _ProgressSummary(
+                        bestScore: _bestScore,
+                        goalScore: _goalScore,
+                        onEditGoal: _editGoal,
+                      ),
                       const SizedBox(height: 16),
                       _PracticeSection(
                         onCardTap: (card) {
@@ -225,6 +402,7 @@ class _HomePageState extends State<HomePage> {
       final test = entry.value;
       final progress = 0.35 + (index * 0.2);
       return _ActiveTestCardData(
+        testId: test.id,
         title: test.name,
         status: 'In progress - Practice mode',
         progress: progress.clamp(0.0, 1.0),
@@ -235,9 +413,13 @@ class _HomePageState extends State<HomePage> {
 }
 
 class _ActiveTestsTab extends StatelessWidget {
-  const _ActiveTestsTab({required this.tests});
+  const _ActiveTestsTab({
+    required this.tests,
+    required this.onContinue,
+  });
 
   final List<_ActiveTestCardData> tests;
+  final VoidCallback onContinue;
 
   @override
   Widget build(BuildContext context) {
@@ -268,7 +450,10 @@ class _ActiveTestsTab extends StatelessWidget {
       separatorBuilder: (_, __) => const SizedBox(height: 12),
       itemBuilder: (context, index) {
         final test = tests[index];
-        return _ActiveTestCard(data: test);
+        return _ActiveTestCard(
+          data: test,
+          onResumeLatest: onContinue,
+        );
       },
     );
   }
@@ -410,10 +595,15 @@ class _CompletedTestsTab extends StatelessWidget {
   }
 }
 
+/// Active test card: keeps testId-based navigation *and* resume-latest callback
 class _ActiveTestCard extends StatelessWidget {
-  const _ActiveTestCard({required this.data});
+  const _ActiveTestCard({
+    required this.data,
+    required this.onResumeLatest,
+  });
 
   final _ActiveTestCardData data;
+  final VoidCallback onResumeLatest;
 
   @override
   Widget build(BuildContext context) {
@@ -486,11 +676,15 @@ class _ActiveTestCard extends StatelessWidget {
               children: [
                 Expanded(
                   child: ElevatedButton(
-                    onPressed: () => Navigator.pushNamed(
+                    // If we have a specific testId, go directly to that test.
+                    // Otherwise, fall back to generic "resume latest" logic.
+                    onPressed: data.testId != null
+                        ? () => Navigator.pushNamed(
                       context,
                       AppRouter.test,
-                      arguments: const <int>[0],
-                    ),
+                      arguments: <int>[data.testId!],
+                    )
+                        : onResumeLatest,
                     child: const Text('Continue'),
                   ),
                 ),
@@ -537,53 +731,100 @@ class _PracticeSection extends StatelessWidget {
           ],
         ),
         const SizedBox(height: 10),
-        SizedBox(
-          height: 150,
-          child: ListView.separated(
-            scrollDirection: Axis.horizontal,
-            itemCount: _practiceCards.length,
-            separatorBuilder: (_, __) => const SizedBox(width: 12),
-            itemBuilder: (context, index) {
-              final card = _practiceCards[index];
-              return GestureDetector(
-                onTap: () => onCardTap(card),
-                child: Container(
-                  width: 220,
-                  padding: const EdgeInsets.all(16),
-                  decoration: BoxDecoration(
-                    color: card.color.withOpacity(0.12),
-                    borderRadius: BorderRadius.circular(16),
-                    border: Border.all(color: card.color.withOpacity(0.2)),
+        LayoutBuilder(
+          builder: (context, constraints) {
+            final canWrap = constraints.maxWidth > 520;
+            if (canWrap) {
+              final wrapWidth = constraints.maxWidth >= 880 ? 200.0 : 220.0;
+              return Wrap(
+                alignment: WrapAlignment.center,
+                spacing: 12,
+                runSpacing: 12,
+                children: _practiceCards
+                    .map(
+                      (card) => _PracticeCard(
+                    data: card,
+                    width: wrapWidth,
+                    onTap: () => onCardTap(card),
                   ),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      CircleAvatar(
-                        radius: 18,
-                        backgroundColor: card.color,
-                        child: Icon(card.icon, color: Colors.white, size: 18),
-                      ),
-                      const Spacer(),
-                      Text(
-                        card.title,
-                        style: const TextStyle(
-                          fontSize: 16,
-                          fontWeight: FontWeight.w800,
-                        ),
-                      ),
-                      const SizedBox(height: 4),
-                      Text(
-                        card.subtitle,
-                        style: const TextStyle(color: Color(0xFF475569)),
-                      ),
-                    ],
-                  ),
-                ),
+                )
+                    .toList(),
               );
-            },
-          ),
+            }
+
+            return SizedBox(
+              height: 160,
+              child: ListView.separated(
+                scrollDirection: Axis.horizontal,
+                itemCount: _practiceCards.length,
+                padding: const EdgeInsets.only(right: 4),
+                separatorBuilder: (_, __) => const SizedBox(width: 12),
+                itemBuilder: (context, index) {
+                  final card = _practiceCards[index];
+                  return _PracticeCard(
+                    data: card,
+                    onTap: () => onCardTap(card),
+                  );
+                },
+              ),
+            );
+          },
         ),
       ],
+    );
+  }
+}
+
+class _PracticeCard extends StatelessWidget {
+  const _PracticeCard({
+    required this.data,
+    required this.onTap,
+    this.width = 220,
+  });
+
+  final _PracticeCardData data;
+  final VoidCallback onTap;
+  final double width;
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        width: width,
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: data.color.withOpacity(0.12),
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: data.color.withOpacity(0.2)),
+        ),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          crossAxisAlignment: CrossAxisAlignment.center,
+          children: [
+            CircleAvatar(
+              radius: 18,
+              backgroundColor: data.color,
+              child: Icon(data.icon, color: Colors.white, size: 18),
+            ),
+            const SizedBox(height: 12),
+            Text(
+              data.title,
+              textAlign: TextAlign.center,
+              style: const TextStyle(
+                fontSize: 16,
+                fontWeight: FontWeight.w800,
+              ),
+            ),
+            const SizedBox(height: 6),
+            Text(
+              data.subtitle,
+              textAlign: TextAlign.center,
+              style: const TextStyle(color: Color(0xFF475569)),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }
@@ -627,75 +868,147 @@ class _ErrorBanner extends StatelessWidget {
 }
 
 class _ProgressSummary extends StatelessWidget {
-  const _ProgressSummary();
+  const _ProgressSummary({
+    required this.bestScore,
+    required this.goalScore,
+    required this.onEditGoal,
+  });
+
+  final int bestScore;
+  final int goalScore;
+  final VoidCallback onEditGoal;
 
   @override
   Widget build(BuildContext context) {
+    final statWidgets = _progressStats
+        .map(
+          (stat) => _CircularStat(
+        label: stat.label,
+        value: stat.value,
+        tests: stat.tests,
+        color: stat.color,
+      ),
+    )
+        .toList();
+
     return Card(
       child: Padding(
         padding: const EdgeInsets.all(16),
-        child: Row(
-          children: [
-            Expanded(
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                children: _progressStats
-                    .map((stat) => _CircularStat(
-                  label: stat.label,
-                  value: stat.value,
-                  tests: stat.tests,
-                  color: stat.color,
-                ))
-                    .toList(),
-              ),
-            ),
-            const SizedBox(width: 12),
-            Container(
-              width: 140,
-              padding: const EdgeInsets.all(14),
-              decoration: BoxDecoration(
-                color: const Color(0xFFE8EDFF),
-                borderRadius: BorderRadius.circular(16),
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
+        child: LayoutBuilder(
+          builder: (context, constraints) {
+            final isCompact = constraints.maxWidth < 500;
+
+            if (isCompact) {
+              return Column(
+                crossAxisAlignment: CrossAxisAlignment.center,
                 children: [
-                  const Text(
-                    'Your best score',
-                    style: TextStyle(
-                      color: Color(0xFF2557D6),
-                      fontWeight: FontWeight.w700,
-                    ),
+                  Wrap(
+                    alignment: WrapAlignment.center,
+                    spacing: 12,
+                    runSpacing: 12,
+                    children: statWidgets,
                   ),
-                  const SizedBox(height: 6),
-                  const Text(
-                    '1310',
-                    style: TextStyle(
-                      fontSize: 28,
-                      fontWeight: FontWeight.w800,
-                      color: Color(0xFF0F172A),
-                    ),
-                  ),
-                  const SizedBox(height: 4),
-                  const Text(
-                    'Goal: 1400',
-                    style: TextStyle(color: Color(0xFF475569)),
-                  ),
-                  const SizedBox(height: 10),
-                  OutlinedButton(
-                    onPressed: () {},
-                    style: OutlinedButton.styleFrom(
-                      minimumSize: const Size.fromHeight(38),
-                      side: const BorderSide(color: Color(0xFF2557D6)),
-                    ),
-                    child: const Text('Set goal'),
+                  const SizedBox(height: 14),
+                  _BestScoreCard(
+                    bestScore: bestScore,
+                    goalScore: goalScore,
+                    onEditGoal: onEditGoal,
+                    isFullWidth: true,
                   ),
                 ],
-              ),
-            ),
-          ],
+              );
+            }
+
+            return Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Expanded(
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                    children: statWidgets,
+                  ),
+                ),
+                const SizedBox(width: 12),
+                _BestScoreCard(
+                  bestScore: bestScore,
+                  goalScore: goalScore,
+                  onEditGoal: onEditGoal,
+                ),
+              ],
+            );
+          },
         ),
       ),
+    );
+  }
+}
+
+class _BestScoreCard extends StatelessWidget {
+  const _BestScoreCard({
+    required this.bestScore,
+    required this.goalScore,
+    required this.onEditGoal,
+    this.isFullWidth = false,
+  });
+
+  final int bestScore;
+  final int goalScore;
+  final VoidCallback onEditGoal;
+  final bool isFullWidth;
+
+  @override
+  Widget build(BuildContext context) {
+    final content = Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: const Color(0xFFE8EDFF),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: const Color(0xFFCBD5FF)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            'Your best score',
+            style: TextStyle(
+              color: Color(0xFF2557D6),
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            '$bestScore',
+            style: const TextStyle(
+              fontSize: 30,
+              fontWeight: FontWeight.w800,
+              color: Color(0xFF0F172A),
+            ),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            'Goal: $goalScore',
+            style: const TextStyle(color: Color(0xFF475569)),
+          ),
+          const SizedBox(height: 12),
+          OutlinedButton(
+            onPressed: onEditGoal,
+            style: OutlinedButton.styleFrom(
+              minimumSize: const Size.fromHeight(42),
+              side: const BorderSide(color: Color(0xFF2557D6)),
+            ),
+            child: const Text('Set goal'),
+          ),
+        ],
+      ),
+    );
+
+    if (isFullWidth) {
+      return SizedBox(width: double.infinity, child: content);
+    }
+
+    return ConstrainedBox(
+      constraints: const BoxConstraints(minWidth: 150, maxWidth: 190),
+      child: content,
     );
   }
 }
@@ -715,53 +1028,68 @@ class _CircularStat extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Column(
-      children: [
-        SizedBox(
-          height: 96,
-          width: 96,
-          child: Stack(
-            alignment: Alignment.center,
-            children: [
-              CircularProgressIndicator(
-                value: value,
-                strokeWidth: 10,
-                backgroundColor: const Color(0xFFE2E8F0),
-                valueColor: AlwaysStoppedAnimation<Color>(color),
-              ),
-              Text(
-                '${(value * 100).round()}%',
-                style: const TextStyle(
-                  fontWeight: FontWeight.w800,
-                  fontSize: 16,
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+      decoration: BoxDecoration(
+        color: color.withOpacity(0.08),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: color.withOpacity(0.18)),
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          SizedBox(
+            height: 90,
+            width: 90,
+            child: Stack(
+              alignment: Alignment.center,
+              children: [
+                CircularProgressIndicator(
+                  value: value,
+                  strokeWidth: 10,
+                  backgroundColor: const Color(0xFFE2E8F0),
+                  valueColor: AlwaysStoppedAnimation<Color>(color),
                 ),
-              ),
-            ],
+                Text(
+                  '${(value * 100).round()}%',
+                  style: const TextStyle(
+                    fontWeight: FontWeight.w800,
+                    fontSize: 16,
+                  ),
+                ),
+              ],
+            ),
           ),
-        ),
-        const SizedBox(height: 8),
-        Text(
-          label,
-          style: const TextStyle(fontWeight: FontWeight.w700),
-        ),
-        const SizedBox(height: 2),
-        Text(
-          '$tests tests completed',
-          style: const TextStyle(color: Color(0xFF475569), fontSize: 12),
-        ),
-      ],
+          const SizedBox(height: 10),
+          Text(
+            label,
+            textAlign: TextAlign.center,
+            style: const TextStyle(
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            '$tests tests completed',
+            textAlign: TextAlign.center,
+            style: const TextStyle(color: Color(0xFF475569), fontSize: 12),
+          ),
+        ],
+      ),
     );
   }
 }
 
 class _ActiveTestCardData {
   const _ActiveTestCardData({
+    this.testId,
     required this.title,
     required this.status,
     required this.progress,
     required this.timeRemaining,
   });
 
+  final int? testId; // from first version (preserved)
   final String title;
   final String status;
   final double progress;
