@@ -154,11 +154,11 @@ class _TestPageState extends State<TestPage> {
               runSpacing: 8,
               children: List.generate(
                 questions.length,
-                    (index) {
+                (index) {
                   final isAnswered =
                       _questionsProvider.answers[questions[index].id] != null;
                   final isFlagged =
-                  _flagged.isNotEmpty ? _flagged[index] : false;
+                      _flagged.isNotEmpty ? _flagged[index] : false;
                   return GestureDetector(
                     onTap: () {
                       Navigator.pop(context);
@@ -213,32 +213,74 @@ class _TestPageState extends State<TestPage> {
               '${questions.length - questions.where((q) => _questionsProvider.answers[q.id] != null).length} unanswered',
               style: const TextStyle(color: Color(0xFF475569)),
             ),
+            const SizedBox(height: 12),
+            SizedBox(
+              width: double.infinity,
+              child: OutlinedButton.icon(
+                onPressed: () {
+                  Navigator.pop(context);
+                  _openPreviewPage();
+                },
+                icon: const Icon(Icons.view_comfy_alt_outlined),
+                label: const Text('Go to preview page'),
+              ),
+            ),
           ],
         ),
       ),
     );
   }
 
+  Future<void> _openPreviewPage({bool launchedFromLastQuestion = false}) async {
+    final questions = _questionsProvider.currentQuestions;
+    if (questions.isEmpty) return;
+
+    final isLastSection = _currentSectionIndex == _sections.length - 1;
+    final selectedIndex = await Navigator.push<int>(
+      context,
+      MaterialPageRoute(
+        builder: (_) => _QuestionPreviewPage(
+          sectionLabel: 'Section ${_currentSectionIndex + 1}',
+          questions: questions,
+          flagged: List<bool>.from(_flagged),
+          answeredMap: Map<int, int?>.from(_questionsProvider.answers),
+          currentIndex: _currentQuestion,
+          isLastSection: isLastSection,
+        ),
+      ),
+    );
+
+    if (selectedIndex == -1) {
+      await _completeSection();
+    } else if (selectedIndex != null) {
+      _goToQuestion(selectedIndex);
+    } else if (launchedFromLastQuestion &&
+        selectedIndex == null &&
+        isLastSection) {
+      // fallback: if we came from last question and user backed out, stay put
+    }
+  }
+
   Future<bool> _confirmExit(BuildContext context) async {
     final shouldExit = await showDialog<bool>(
-      context: context,
-      builder: (_) => AlertDialog(
-        title: const Text('Leave test?'),
-        content: const Text(
-          'Your answers will be saved. Do you want to exit to the dashboard?',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: const Text('Stay'),
+          context: context,
+          builder: (_) => AlertDialog(
+            title: const Text('Leave test?'),
+            content: const Text(
+              'Your answers will be saved. Do you want to exit to the dashboard?',
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context, false),
+                child: const Text('Stay'),
+              ),
+              ElevatedButton(
+                onPressed: () => Navigator.pop(context, true),
+                child: const Text('Exit'),
+              ),
+            ],
           ),
-          ElevatedButton(
-            onPressed: () => Navigator.pop(context, true),
-            child: const Text('Exit'),
-          ),
-        ],
-      ),
-    ) ??
+        ) ??
         false;
 
     if (!context.mounted) return shouldExit;
@@ -247,7 +289,7 @@ class _TestPageState extends State<TestPage> {
       Navigator.pushNamedAndRemoveUntil(
         context,
         AppRouter.home,
-            (_) => false,
+        (_) => false,
       );
     }
     return shouldExit;
@@ -350,7 +392,7 @@ class _TestPageState extends State<TestPage> {
 
     final isLastQuestion = _currentQuestion == questions.length - 1;
     if (isLastQuestion) {
-      await _completeSection();
+      await _openPreviewPage(launchedFromLastQuestion: true);
     } else {
       _goToQuestion(_currentQuestion + 1);
     }
@@ -435,9 +477,9 @@ class _TestPageState extends State<TestPage> {
                 onTap: _showNotes,
               ),
               _ToolbarButton(
-                icon: Icons.list_alt_outlined,
-                label: 'List',
-                onTap: _openQuestionList,
+                icon: Icons.view_comfy_alt_outlined,
+                label: 'Preview',
+                onTap: _openPreviewPage,
               ),
               _ToolbarButton(
                 icon: Icons.text_fields,
@@ -678,7 +720,7 @@ class _AnswerOption extends StatelessWidget {
           borderRadius: BorderRadius.circular(12),
           border: Border.all(
             color:
-            isSelected ? const Color(0xFF2557D6) : const Color(0xFFE2E8F0),
+                isSelected ? const Color(0xFF2557D6) : const Color(0xFFE2E8F0),
             width: 1.5,
           ),
         ),
@@ -712,6 +754,120 @@ class _AnswerOption extends StatelessWidget {
             ),
             if (isSelected)
               const Icon(Icons.check_circle, color: Color(0xFF2557D6)),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _QuestionPreviewPage extends StatelessWidget {
+  const _QuestionPreviewPage({
+    required this.sectionLabel,
+    required this.questions,
+    required this.flagged,
+    required this.answeredMap,
+    required this.currentIndex,
+    required this.isLastSection,
+  });
+
+  final String sectionLabel;
+  final List<QuestionModel> questions;
+  final List<bool> flagged;
+  final Map<int, int?> answeredMap;
+  final int currentIndex;
+  final bool isLastSection;
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: Text('$sectionLabel preview'),
+      ),
+      body: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              '$sectionLabel • ${questions.length} questions',
+              style: const TextStyle(
+                fontSize: 16,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+            const SizedBox(height: 12),
+            Expanded(
+              child: GridView.builder(
+                gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                  crossAxisCount: 5,
+                  mainAxisSpacing: 10,
+                  crossAxisSpacing: 10,
+                  childAspectRatio: 1,
+                ),
+                itemCount: questions.length,
+                itemBuilder: (context, index) {
+                  final isAnswered = answeredMap[questions[index].id] != null;
+                  final isFlagged = flagged.isNotEmpty && index < flagged.length
+                      ? flagged[index]
+                      : false;
+                  final isCurrent = index == currentIndex;
+
+                  return InkWell(
+                    borderRadius: BorderRadius.circular(12),
+                    onTap: () => Navigator.pop(context, index),
+                    child: Container(
+                      decoration: BoxDecoration(
+                        color:
+                            isCurrent ? const Color(0xFF2557D6) : Colors.white,
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(
+                          color: isAnswered
+                              ? const Color(0xFF10B981)
+                              : const Color(0xFFE2E8F0),
+                          width: 1.5,
+                        ),
+                      ),
+                      child: Stack(
+                        children: [
+                          Center(
+                            child: Text(
+                              '${index + 1}',
+                              style: TextStyle(
+                                color: isCurrent
+                                    ? Colors.white
+                                    : const Color(0xFF0F172A),
+                                fontWeight: FontWeight.w800,
+                              ),
+                            ),
+                          ),
+                          if (isFlagged)
+                            const Positioned(
+                              top: 6,
+                              right: 6,
+                              child: Icon(
+                                Icons.flag,
+                                size: 14,
+                                color: Color(0xFFF97316),
+                              ),
+                            ),
+                        ],
+                      ),
+                    ),
+                  );
+                },
+              ),
+            ),
+            const SizedBox(height: 12),
+            SizedBox(
+              width: double.infinity,
+              child: ElevatedButton.icon(
+                onPressed: () => Navigator.pop(context, -1),
+                icon: const Icon(Icons.check_circle_outline),
+                label:
+                    Text(isLastSection ? 'Submit and finish' : 'Next section'),
+              ),
+            ),
           ],
         ),
       ),
