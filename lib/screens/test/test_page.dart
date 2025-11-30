@@ -1,12 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
+import '../../core/api/test_api.dart';
 import '../../features/auth/state/auth_provider.dart';
 import '../../features/test/data/models/test_model.dart';
 import '../../features/test/state/test_provider.dart';
 import '../../router.dart';
-import '../../utils/DB_test_options.dart';
-import '../../utils/DB_tests.dart';
+import '../../utils/DB_ansvers.dart';
 
 class TestPage extends StatefulWidget {
   const TestPage({super.key, required this.testList});
@@ -18,116 +18,102 @@ class TestPage extends StatefulWidget {
 }
 
 class _TestPageState extends State<TestPage> {
-  final _db = DatabaseHelperTests.instance;
-  final _dbOptions = DatabaseHelperOptions.instance;
-  late final QuestionsProvider _api;
+  static const _sections = ['section_1', 'section_2', 'section_3', 'section_4'];
+
+  late final QuestionsProvider _questionsProvider;
+  final DatabaseHelper _answersDb = DatabaseHelper.instance;
+  final TestApi _testApi = TestApi();
   final PageController _pageController = PageController();
 
-  List<QuestionModel> _questions = [];
-  List<int?> _selectedOptions = [];
-  List<bool> _flagged = [];
   int _currentQuestion = 0;
+  int _currentSectionIndex = 0;
   double _textScale = 1.0;
-  bool _isLoading = true;
-  bool _usingSampleData = false;
+  bool _initializing = true;
+  String? _error;
+  List<bool> _flagged = [];
 
-  int? get _testId => widget.testList.isNotEmpty ? widget.testList.first : null;
+  int get _testId => widget.testList.isNotEmpty ? widget.testList.first : 0;
 
   @override
   void initState() {
     super.initState();
-    _api = QuestionsProvider(context.read<AuthProvider>());
-    _loadQuestions();
+    _questionsProvider = QuestionsProvider(context.read<AuthProvider>());
+    _initTest();
   }
 
   @override
   void dispose() {
+    _questionsProvider.dispose();
     _pageController.dispose();
     super.dispose();
   }
 
-  Future<void> _loadQuestions() async {
-    setState(() => _isLoading = true);
-    final List<QuestionModel> loaded = [];
-    var usedSample = false;
-    final testId = _testId;
+  Future<void> _initTest() async {
+    setState(() {
+      _initializing = true;
+      _error = null;
+    });
 
-    if (testId != null) {
-      try {
-        final data = await _db.getTestsById(testId);
-        for (final element in data) {
-          final optionsRaw =
-          await _dbOptions.getResultsbyQId(element['question_id'] as int);
-          final options = optionsRaw
-              .map(
-                (e) => OptionModel(
-              id: e['id'] as int,
-              text: e['option_text'] as String,
-              isCorrect: (e['is_correct'] as int) == 1,
-              image: e['image'] as String?,
-            ),
-          )
-              .toList();
-
-          loaded.add(
-            QuestionModel(
-              id: element['question_id'] as int,
-              questionText: element['question_text'] as String,
-              image: element['image'] as String?,
-              score: (element['score'] as num).toDouble(),
-              questionType: element['question_type'] as String,
-              section: element['section'] as String,
-              options: options,
-            ),
-          );
-        }
-      } catch (e) {
-        debugPrint('Error loading cached questions: $e');
+    try {
+      await _questionsProvider.createUserTest(testId: _testId);
+      await _loadSection();
+    } catch (e) {
+      setState(() => _error = e.toString());
+    } finally {
+      if (mounted) {
+        setState(() => _initializing = false);
       }
     }
-
-    if (loaded.isEmpty && testId != null) {
-      await _api.loadQuestions(testId);
-      loaded.addAll(_api.questions);
-    }
-
-    if (loaded.isEmpty) {
-      usedSample = true;
-      loaded.addAll(
-        _sampleQuestions
-            .asMap()
-            .entries
-            .map((entry) => _questionModelFromSample(entry.key, entry.value))
-            .toList(),
-      );
-    }
-
-    if (!mounted) return;
-
-    setState(() {
-      _questions = loaded;
-      _selectedOptions = List<int?>.filled(_questions.length, null);
-      _flagged = List<bool>.filled(_questions.length, false);
-      _currentQuestion = 0;
-      _isLoading = false;
-      _usingSampleData = usedSample;
-    });
   }
 
-  void _selectOption(int optionId) {
-    if (_questions.isEmpty) return;
+  Future<void> _loadSection() async {
     setState(() {
-      _selectedOptions[_currentQuestion] = optionId;
+      _initializing = true;
+      _error = null;
+      _currentQuestion = 0;
     });
+
+    try {
+      final sectionId = _sections[_currentSectionIndex];
+      await _questionsProvider.loadSection(
+        testId: _testId,
+        sectionId: sectionId,
+      );
+
+      final questions = _questionsProvider.questionsForSection(sectionId);
+      _flagged = List<bool>.filled(questions.length, false);
+
+      if (_pageController.hasClients) {
+        _pageController.jumpToPage(0);
+      } else {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (_pageController.hasClients) {
+            _pageController.jumpToPage(0);
+          }
+        });
+      }
+    } catch (e) {
+      _error = e.toString();
+    } finally {
+      if (mounted) {
+        setState(() => _initializing = false);
+      }
+    }
+  }
+
+  void _selectOption(QuestionModel question, int optionId) {
+    _questionsProvider.selectAnswer(question.id, optionId);
+    setState(() {});
   }
 
   void _toggleFlag(int index) {
-    if (_questions.isEmpty) return;
+    if (index < 0 || index >= _flagged.length) return;
     setState(() => _flagged[index] = !_flagged[index]);
   }
 
   void _goToQuestion(int index) {
-    if (index < 0 || index >= _questions.length) return;
+    final questions = _questionsProvider.currentQuestions;
+    if (index < 0 || index >= questions.length) return;
     setState(() => _currentQuestion = index);
     _pageController.animateToPage(
       index,
@@ -144,7 +130,8 @@ class _TestPageState extends State<TestPage> {
   }
 
   void _openQuestionList() {
-    if (_questions.isEmpty) return;
+    final questions = _questionsProvider.currentQuestions;
+    if (questions.isEmpty) return;
 
     showModalBottomSheet<void>(
       context: context,
@@ -154,9 +141,9 @@ class _TestPageState extends State<TestPage> {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text(
-              'Question list',
-              style: TextStyle(
+            Text(
+              'Section ${_currentSectionIndex + 1} questions',
+              style: const TextStyle(
                 fontSize: 18,
                 fontWeight: FontWeight.w800,
               ),
@@ -166,9 +153,10 @@ class _TestPageState extends State<TestPage> {
               spacing: 8,
               runSpacing: 8,
               children: List.generate(
-                _questions.length,
+                questions.length,
                     (index) {
-                  final isAnswered = _selectedOptions[index] != null;
+                  final isAnswered =
+                      _questionsProvider.answers[questions[index].id] != null;
                   final isFlagged =
                   _flagged.isNotEmpty ? _flagged[index] : false;
                   return GestureDetector(
@@ -222,7 +210,7 @@ class _TestPageState extends State<TestPage> {
             ),
             const SizedBox(height: 12),
             Text(
-              '${_questions.length - _selectedOptions.where((e) => e != null).length} unanswered',
+              '${questions.length - questions.where((q) => _questionsProvider.answers[q.id] != null).length} unanswered',
               style: const TextStyle(color: Color(0xFF475569)),
             ),
           ],
@@ -263,39 +251,6 @@ class _TestPageState extends State<TestPage> {
       );
     }
     return shouldExit;
-  }
-
-  Future<void> _confirmEndModule(BuildContext context) async {
-    if (_questions.isEmpty) return;
-
-    final unanswered =
-        _questions.length - _selectedOptions.where((e) => e != null).length;
-    final end = await showDialog<bool>(
-      context: context,
-      builder: (_) => AlertDialog(
-        title: const Text('End module?'),
-        content: Text(
-          'You still have $unanswered unanswered questions. Are you sure you want to end this module?',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: const Text('Continue answering'),
-          ),
-          ElevatedButton(
-            onPressed: () => Navigator.pop(context, true),
-            child: const Text('End module'),
-          ),
-        ],
-      ),
-    ) ??
-        false;
-
-    if (!context.mounted) return;
-
-    if (end) {
-      Navigator.pushReplacementNamed(context, AppRouter.results);
-    }
   }
 
   Future<void> _showNotes() async {
@@ -343,11 +298,92 @@ class _TestPageState extends State<TestPage> {
     );
   }
 
-  Widget _buildBody() {
-    if (_isLoading) {
+  Future<void> _persistSectionAnswers() async {
+    final userTestId = _questionsProvider.userTestId;
+    if (userTestId == null) return;
+
+    final sectionId = _sections[_currentSectionIndex];
+    final answers = _questionsProvider.answersForSection(sectionId);
+
+    for (final answer in answers) {
+      await _answersDb.insertResult({
+        'user_test_id': userTestId,
+        'question_id': answer['question_id'],
+        'selected_option_id': answer['selected_option_id'],
+        'is_correct': (answer['is_correct'] as bool) ? 1 : 0,
+      });
+    }
+  }
+
+  List<Map<String, dynamic>> _gatherAllAnswers() {
+    final List<Map<String, dynamic>> all = [];
+    for (final section in _sections) {
+      all.addAll(_questionsProvider.answersForSection(section));
+    }
+    return all.where((a) => a['selected_option_id'] != null).toList();
+  }
+
+  Future<void> _completeSection() async {
+    await _persistSectionAnswers();
+
+    final isLastSection = _currentSectionIndex == _sections.length - 1;
+    if (isLastSection) {
+      final userTestId = _questionsProvider.userTestId;
+      if (userTestId != null) {
+        await _testApi.submitAnswers(
+          userTestId: userTestId,
+          answers: _gatherAllAnswers(),
+        );
+      }
+      if (!mounted) return;
+      Navigator.pushReplacementNamed(context, AppRouter.results);
+      return;
+    }
+
+    setState(() => _currentSectionIndex += 1);
+    await _loadSection();
+  }
+
+  Future<void> _onNext() async {
+    final questions = _questionsProvider.currentQuestions;
+    if (questions.isEmpty) return;
+
+    final isLastQuestion = _currentQuestion == questions.length - 1;
+    if (isLastQuestion) {
+      await _completeSection();
+    } else {
+      _goToQuestion(_currentQuestion + 1);
+    }
+  }
+
+  Widget _buildBody(BuildContext context) {
+    final provider = context.watch<QuestionsProvider>();
+    final questions = provider.currentQuestions;
+
+    if (_initializing || provider.isLoading) {
       return const Center(child: CircularProgressIndicator());
     }
-    if (_questions.isEmpty) {
+
+    if (_error != null) {
+      return Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              'Error: $_error',
+              style: const TextStyle(color: Colors.red),
+            ),
+            const SizedBox(height: 8),
+            ElevatedButton(
+              onPressed: _loadSection,
+              child: const Text('Retry'),
+            ),
+          ],
+        ),
+      );
+    }
+
+    if (questions.isEmpty) {
       return const Center(child: Text('No questions available.'));
     }
 
@@ -362,19 +398,21 @@ class _TestPageState extends State<TestPage> {
             onPageChanged: (index) {
               setState(() => _currentQuestion = index);
             },
-            itemCount: _questions.length,
-            itemBuilder: (_, index) => _buildQuestionCard(index),
+            itemCount: questions.length,
+            itemBuilder: (_, index) => _buildQuestionCard(questions, index),
           ),
         ),
-        _buildNavigation(),
+        _buildNavigation(questions),
       ],
     );
   }
 
   Widget _buildToolbar() {
-    final isFlagged = _flagged.isNotEmpty && _currentQuestion < _flagged.length
-        ? _flagged[_currentQuestion]
-        : false;
+    final questions = _questionsProvider.currentQuestions;
+    final isFlagged = _flagged.isNotEmpty &&
+        _currentQuestion < _flagged.length &&
+        _flagged[_currentQuestion];
+
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
@@ -408,6 +446,13 @@ class _TestPageState extends State<TestPage> {
               ),
             ],
           ),
+          Text(
+            'Section ${_currentSectionIndex + 1} of ${_sections.length} (${questions.length} Qs)',
+            style: const TextStyle(
+              color: Color(0xFF475569),
+              fontWeight: FontWeight.w700,
+            ),
+          ),
           IconButton(
             icon: const Icon(Icons.close),
             onPressed: () => _confirmExit(context),
@@ -417,12 +462,9 @@ class _TestPageState extends State<TestPage> {
     );
   }
 
-  Widget _buildQuestionCard(int index) {
-    final question = _questions[index];
-    final selectedId = _selectedOptions[index];
-    final passage = _usingSampleData && index < _sampleQuestions.length
-        ? _sampleQuestions[index].passage
-        : null;
+  Widget _buildQuestionCard(List<QuestionModel> questions, int index) {
+    final question = questions[index];
+    final selectedId = _questionsProvider.answers[question.id];
 
     return SingleChildScrollView(
       padding: const EdgeInsets.all(16),
@@ -430,33 +472,13 @@ class _TestPageState extends State<TestPage> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(
-            '${question.section} • Question ${index + 1} of ${_questions.length}',
+            '${question.section} • Question ${index + 1} of ${questions.length}',
             style: const TextStyle(
               color: Color(0xFF475569),
               fontWeight: FontWeight.w700,
             ),
           ),
           const SizedBox(height: 10),
-          if (passage != null) ...[
-            Container(
-              width: double.infinity,
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: const Color(0xFFF8FAFC),
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: const Color(0xFFE2E8F0)),
-              ),
-              child: Text(
-                passage,
-                textScaler: TextScaler.linear(_textScale),
-                style: const TextStyle(
-                  color: Color(0xFF1F2937),
-                  height: 1.4,
-                ),
-              ),
-            ),
-            const SizedBox(height: 12),
-          ],
           Text(
             question.questionText,
             textScaler: TextScaler.linear(_textScale),
@@ -482,7 +504,7 @@ class _TestPageState extends State<TestPage> {
                 label: String.fromCharCode(65 + indexOption),
                 text: option.text,
                 isSelected: selectedId == option.id,
-                onTap: () => _selectOption(option.id),
+                onTap: () => _selectOption(question, option.id),
               );
             }).toList(),
           ),
@@ -491,10 +513,12 @@ class _TestPageState extends State<TestPage> {
     );
   }
 
-  Widget _buildNavigation() {
-    final unanswered =
-        _questions.length - _selectedOptions.where((e) => e != null).length;
-    final isLast = _currentQuestion == _questions.length - 1;
+  Widget _buildNavigation(List<QuestionModel> questions) {
+    final answeredCount =
+        questions.where((q) => _questionsProvider.answers[q.id] != null).length;
+    final unanswered = questions.length - answeredCount;
+    final isLast = _currentQuestion == questions.length - 1;
+    final isLastSection = _currentSectionIndex == _sections.length - 1;
 
     return Container(
       width: double.infinity,
@@ -521,18 +545,24 @@ class _TestPageState extends State<TestPage> {
                 label: const Text('Questions'),
               ),
               const Spacer(),
-              TextButton(
-                onPressed: _currentQuestion > 0
-                    ? () => _goToQuestion(_currentQuestion - 1)
-                    : null,
-                child: const Text('Previous'),
+              Flexible(
+                child: TextButton(
+                  onPressed: _currentQuestion > 0
+                      ? () => _goToQuestion(_currentQuestion - 1)
+                      : null,
+                  child: const Text('Previous'),
+                ),
               ),
               const SizedBox(width: 8),
-              ElevatedButton(
-                onPressed: isLast
-                    ? () => _confirmEndModule(context)
-                    : () => _goToQuestion(_currentQuestion + 1),
-                child: Text(isLast ? 'End module' : 'Next'),
+              Flexible(
+                child: ElevatedButton(
+                  onPressed: _onNext,
+                  child: Text(
+                    isLast
+                        ? (isLastSection ? 'Submit' : 'Next Section')
+                        : 'Next',
+                  ),
+                ),
               ),
             ],
           ),
@@ -543,28 +573,35 @@ class _TestPageState extends State<TestPage> {
 
   @override
   Widget build(BuildContext context) {
-    return PopScope(
-      canPop: false,
-      onPopInvokedWithResult: (didPop, _) async {
-        if (didPop) return;
-        await _confirmExit(context);
-      },
-      child: Scaffold(
-        appBar: AppBar(
-          title: const Text('Test'),
-          leading: IconButton(
-            icon: const Icon(Icons.arrow_back),
-            onPressed: () => _confirmExit(context),
-          ),
-          actions: [
-            IconButton(
-              icon: const Icon(Icons.refresh),
-              onPressed: _loadQuestions,
-              tooltip: 'Reload',
+    return ChangeNotifierProvider.value(
+      value: _questionsProvider,
+      child: PopScope(
+        canPop: false,
+        onPopInvokedWithResult: (didPop, _) async {
+          if (didPop) return;
+          await _confirmExit(context);
+        },
+        child: Scaffold(
+          appBar: AppBar(
+            title: const Text('Test'),
+            leading: IconButton(
+              icon: const Icon(Icons.arrow_back),
+              onPressed: () => _confirmExit(context),
             ),
-          ],
+            actions: [
+              IconButton(
+                icon: const Icon(Icons.refresh),
+                onPressed: _loadSection,
+                tooltip: 'Reload section',
+              ),
+            ],
+          ),
+          body: SafeArea(
+            child: Builder(
+              builder: (ctx) => _buildBody(ctx),
+            ),
+          ),
         ),
-        body: SafeArea(child: _buildBody()),
       ),
     );
   }
@@ -681,71 +718,3 @@ class _AnswerOption extends StatelessWidget {
     );
   }
 }
-
-class _Question {
-  const _Question({
-    required this.section,
-    required this.module,
-    required this.prompt,
-    required this.options,
-    this.passage,
-  });
-
-  final String section;
-  final String module;
-  final String prompt;
-  final List<String> options;
-  final String? passage;
-}
-
-QuestionModel _questionModelFromSample(int index, _Question question) {
-  return QuestionModel(
-    id: index,
-    questionText: question.prompt,
-    image: null,
-    score: 1,
-    questionType: question.module,
-    section: question.section,
-    options: question.options.asMap().entries.map((entry) {
-      return OptionModel(
-        id: entry.key,
-        text: entry.value,
-        isCorrect: entry.key == 0,
-        image: null,
-      );
-    }).toList(),
-  );
-}
-
-const _sampleQuestions = <_Question>[
-  _Question(
-    section: 'Reading & Writing',
-    module: 'Module 1',
-    passage:
-    'The school newspaper is planning to launch a new science column.\n'
-        'Students will submit short articles describing experiments, inventions, or\n'
-        'discoveries that interest them. The editors hope the column will encourage\n'
-        'more students to explore science outside their classes.',
-    prompt:
-    'Which choice best states the main purpose of the new science column?',
-    options: [
-      'To explain difficult science topics in advanced detail',
-      'To replace traditional science classes at the school',
-      'To give students a space to share their interest in science',
-      'To report only on science competitions and awards',
-    ],
-  ),
-  _Question(
-    section: 'Math',
-    module: 'Module 2',
-    prompt:
-    'A tutoring center charges a fixed registration fee of \$10 plus \$8 per hour of tutoring. '
-        'Which equation represents the total cost C (in dollars) for h hours of tutoring?',
-    options: [
-      'C = 10h + 8',
-      'C = 8h + 10',
-      'C = 18h',
-      'C = 10h - 8',
-    ],
-  ),
-];

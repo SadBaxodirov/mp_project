@@ -35,8 +35,8 @@ class UserTestApi {
     bool exam = false,
   }) async {
     final response = await client.post('/user-tests/', {
-      "user": userId,
-      "test": testId,
+      "user_id": userId,
+      "test_id": testId,
       "exam": exam,
     });
 
