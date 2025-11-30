@@ -9,6 +9,24 @@ class UserTestApi {
 
   UserTestApi() : client = ApiClient(apiBaseUrl);
 
+  Future<List<UserTest>> getUserTests({int? userId}) async {
+    final query = userId != null ? '?user=$userId' : '';
+    final response = await client.get('/user-tests/$query');
+
+    if (response.statusCode != 200) {
+      throw Exception(
+        "Failed to load user tests (status: ${response.statusCode})",
+      );
+    }
+
+    final List<dynamic> data =
+        jsonDecode(utf8.decode(response.bodyBytes)) as List<dynamic>;
+
+    return data
+        .map((json) => UserTest.fromJson(json as Map<String, dynamic>))
+        .toList();
+  }
+
   ///create user test when user starts solving test, userId and testId required
   ///exam is not required, default: false
   Future<UserTest> createUserTest({

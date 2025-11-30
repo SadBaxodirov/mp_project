@@ -39,15 +39,23 @@ class AuthProvider extends ChangeNotifier {
 
   Future<void> login(String username, String password) async {
     await _withLoader(() async {
-      final tokens = await _userApi.login(username: username, password: password);
+      final tokens =
+          await _userApi.login(username: username, password: password);
       await _saveTokens(tokens);
       currentUser = await _userApi.getCurrentUser();
       notifyListeners();
     });
   }
 
-  Future<void> register(String username, String firstName, String lastName,
-      String school, String grade,String phoneNumber, String email, String password) async {
+  Future<void> register(
+      String username,
+      String firstName,
+      String lastName,
+      String school,
+      String grade,
+      String phoneNumber,
+      String email,
+      String password) async {
     await _withLoader(() async {
       final newUser = User(
           username: username,
@@ -75,6 +83,43 @@ class AuthProvider extends ChangeNotifier {
     currentUser = null;
     await TokenStorage.clear();
     notifyListeners();
+  }
+
+  Future<void> refreshCurrentUser() async {
+    if (!isLoggedIn) return;
+    try {
+      currentUser = await _userApi.getCurrentUser();
+      notifyListeners();
+    } catch (_) {
+      await logout();
+    }
+  }
+
+  Future<void> updateProfile({
+    String? username,
+    String? firstName,
+    String? lastName,
+    String? school,
+    String? grade,
+    String? phoneNumber,
+    String? email,
+  }) async {
+    await _withLoader(() async {
+      final existing = currentUser;
+      if (existing == null) throw Exception('Not logged in');
+      final updated = await _userApi.updateCurrentUser(
+        username: username,
+        firstName: firstName,
+        lastName: lastName,
+        school: school,
+        grade: grade,
+        phoneNumber: phoneNumber,
+        email: email,
+        existing: existing,
+      );
+      currentUser = updated;
+      notifyListeners();
+    });
   }
 
   Future<void> _saveTokens(AuthTokens tokens) async {
