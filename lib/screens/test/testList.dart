@@ -19,9 +19,9 @@ class _TestListState extends State<TestList> {
   String _selectedFilter = _filters.first;
 
   @override
-  void dispose() {
-    _searchController.dispose();
-    super.dispose();
+  void initState() {
+    super.initState();
+    _loadTests();
   }
 
   Future<void> _loadTests() async {
@@ -43,17 +43,17 @@ class _TestListState extends State<TestList> {
     final saved = _savedTests
         .map(
           (row) => _LibraryTest(
-            id: (row['test_id'] as num).toInt(),
-            title: 'Saved Test ${(row['test_id'] as num).toInt()}',
-            tagline: 'Resume a locally saved attempt.',
-            description: 'Loaded from offline storage on this device.',
-            duration: 'Unknown duration',
-            modules: 'Saved',
-            difficulty: 'Saved',
-            tags: const ['Saved'],
-            ctaLabel: 'Resume',
-          ),
-        )
+        id: (row['test_id'] as num).toInt(),
+        title: 'Saved Test ${(row['test_id'] as num).toInt()}',
+        tagline: 'Resume a locally saved attempt.',
+        description: 'Loaded from offline storage on this device.',
+        duration: 'Unknown duration',
+        modules: 'Saved',
+        difficulty: 'Saved',
+        tags: const ['Saved'],
+        ctaLabel: 'Resume',
+      ),
+    )
         .toList();
     return [..._tests, ...saved];
   }
@@ -102,13 +102,13 @@ class _TestListState extends State<TestList> {
                 children: _filters
                     .map(
                       (label) => ChoiceChip(
-                        label: Text(label),
-                        selected: _selectedFilter == label,
-                        onSelected: (_) {
-                          setState(() => _selectedFilter = label);
-                        },
-                      ),
-                    )
+                    label: Text(label),
+                    selected: _selectedFilter == label,
+                    onSelected: (_) {
+                      setState(() => _selectedFilter = label);
+                    },
+                  ),
+                )
                     .toList(),
               ),
               const SizedBox(height: 16),
@@ -160,13 +160,13 @@ class _SearchField extends StatelessWidget {
         prefixIcon: const Icon(Icons.search),
         suffixIcon: controller.text.isNotEmpty
             ? IconButton(
-                onPressed: () {
-                  controller.clear();
-                  FocusScope.of(context).unfocus();
-                  onChanged();
-                },
-                icon: const Icon(Icons.close),
-              )
+          onPressed: () {
+            controller.clear();
+            FocusScope.of(context).unfocus();
+            onChanged();
+          },
+          icon: const Icon(Icons.close),
+        )
             : null,
       ),
       onChanged: (_) => onChanged(),
@@ -393,7 +393,7 @@ const _tests = <_LibraryTest>[
     title: 'Official SAT Practice Test 1',
     tagline: 'Full test - 2 modules - ~134 minutes',
     description:
-        'Real SAT test from previous years, includes Reading & Writing + Math.',
+    'Real SAT test from previous years, includes Reading & Writing + Math.',
     duration: '~134 min',
     modules: '2 modules',
     difficulty: 'Official',
