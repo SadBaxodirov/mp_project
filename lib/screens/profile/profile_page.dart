@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 
 import '../../features/auth/state/auth_provider.dart';
 import '../../router.dart';
+import '../../widgets/main_navigation_bar.dart';
 
 class ProfilePage extends StatelessWidget {
   const ProfilePage({super.key});
@@ -37,6 +38,7 @@ class ProfilePage extends StatelessWidget {
       appBar: AppBar(
         title: const Text('Profile'),
       ),
+      bottomNavigationBar: const MainNavigationBar(currentIndex: 3),
       body: Padding(
         padding: const EdgeInsets.all(20),
         child: Column(
@@ -78,7 +80,7 @@ class ProfilePage extends StatelessWidget {
                 SizedBox(width: 12),
                 _ProfileStatCard(
                   label: 'Average score',
-                  value: '—',
+                  value: '-',
                 ),
               ],
             ),
@@ -87,7 +89,7 @@ class ProfilePage extends StatelessWidget {
               children: [
                 _ProfileStatCard(
                   label: 'Last test date',
-                  value: '—',
+                  value: '-',
                   flex: 2,
                 ),
               ],
