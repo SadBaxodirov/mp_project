@@ -15,8 +15,7 @@ class TestApi {
       throw Exception("Failed to load tests");
     }
 
-    final List<dynamic> jsonList =
-    jsonDecode(utf8.decode(response.bodyBytes));
+    final List<dynamic> jsonList = jsonDecode(utf8.decode(response.bodyBytes));
     return jsonList
         .map((json) => Test.fromJson(json as Map<String, dynamic>))
         .toList();
@@ -31,5 +30,21 @@ class TestApi {
     final Map<String, dynamic> json =
     jsonDecode(utf8.decode(response.bodyBytes));
     return Test.fromJson(json);
+  }
+
+  Future<void> submitAnswers({
+    required int userTestId,
+    required List<Map<String, dynamic>> answers,
+  }) async {
+    final response = await client.post('/submit-answers/', {
+      'user_test_id': userTestId,
+      'answers': answers,
+    });
+
+    if (response.statusCode != 200 && response.statusCode != 201) {
+      throw Exception(
+        'Failed to submit answers (status: ${response.statusCode})',
+      );
+    }
   }
 }
