@@ -67,8 +67,8 @@ class QuestionsProvider extends ChangeNotifier {
         throw Exception('Not authenticated');
       }
 
-      final url = Uri.parse(
-          '$_baseUrl/questions/?test=$testId&section=$sectionId');
+      final url =
+          Uri.parse('$_baseUrl/questions/?test=$testId&section=$sectionId');
 
       final response = await http.get(
         url,
@@ -129,6 +129,9 @@ class QuestionsProvider extends ChangeNotifier {
     }
     final prepared =
         allAnswers().where((a) => a['selected_option_id'] != null).toList();
+    if (prepared.isEmpty) {
+      throw Exception('No answers to submit.');
+    }
     await _testApi.submitAnswers(userTestId: userTestId!, answers: prepared);
   }
 

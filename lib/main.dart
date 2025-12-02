@@ -14,7 +14,8 @@ import 'theme/app_theme.dart';
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   if (kIsWeb) {
-    databaseFactory = databaseFactoryFfiWeb;
+    // Use no-web-worker factory to avoid missing sqflite_sw.js setup on web.
+    databaseFactory = databaseFactoryFfiWebNoWebWorker;
   } else if (Platform.isWindows || Platform.isLinux) {
     sqfliteFfiInit();
     databaseFactory = databaseFactoryFfi;
@@ -28,14 +29,12 @@ void main() async {
         ChangeNotifierProvider<AuthProvider>.value(value: authProvider),
       ],
       child: BluebookApp(
-        initialRoute: authProvider.isLoggedIn
-            ? AppRouter.home
-            : AppRouter.login,
+        initialRoute:
+            authProvider.isLoggedIn ? AppRouter.home : AppRouter.login,
       ),
     ),
   );
 }
-
 
 class BluebookApp extends StatelessWidget {
   final String initialRoute;
