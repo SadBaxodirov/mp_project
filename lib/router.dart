@@ -9,6 +9,7 @@ import 'screens/test/testList.dart';
 import 'screens/test/test_page.dart';
 import 'screens/test_preview/preparing_test_preview_screen.dart';
 import 'screens/test_preview/test_preview_info_screen.dart';
+import 'features/test/data/models/answer_summary.dart';
 
 class AppRouter {
   static const login = '/login';
@@ -26,7 +27,19 @@ class AppRouter {
     register: (_) => const RegisterPage(),
     home: (_) => const HomePage(),
     profile: (_) => const ProfilePage(),
-    results: (_) => const ResultsPage(),
+    results: (context) {
+      final args = ModalRoute.of(context)?.settings.arguments;
+      if (args is Map) {
+        final summaries =
+            (args['summaries'] as List?)?.cast<AnswerSummary>() ?? const [];
+        final userTestId = args['userTestId'] as int?;
+        return ResultsPage(
+          summaries: summaries,
+          userTestId: userTestId,
+        );
+      }
+      return const ResultsPage();
+    },
     testList: (_) => const TestList(),
     test: (context) {
       final args = ModalRoute.of(context)?.settings.arguments;

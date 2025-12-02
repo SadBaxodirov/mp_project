@@ -95,7 +95,7 @@ class QuestionsProvider extends ChangeNotifier {
     }
   }
 
-  void selectAnswer(int questionId, int optionId) {
+  void selectAnswer(int questionId, int? optionId) {
     _answers[questionId] = optionId;
     notifyListeners();
   }
