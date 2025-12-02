@@ -1,8 +1,12 @@
+import 'dart:async';
+import 'dart:io';
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_math_fork/flutter_math.dart';
 import 'package:provider/provider.dart';
+import 'package:webview_flutter/webview_flutter.dart';
 
 import '../../core/api/test_api.dart';
 import '../../features/auth/state/auth_provider.dart';
@@ -11,6 +15,7 @@ import '../../features/test/data/models/test_model.dart';
 import '../../features/test/state/test_provider.dart';
 import '../../router.dart';
 import '../../utils/DB_answers.dart';
+import '../../utils/DB_progress.dart';
 import '../../utils/DB_tests.dart';
 
 class TestPage extends StatefulWidget {
@@ -33,15 +38,34 @@ class TestPage extends StatefulWidget {
 
 class _TestPageState extends State<TestPage> {
   static const _sections = ['section_1', 'section_2', 'section_3', 'section_4'];
+  static const Map<String, int> _sectionMinutes = {
+    'section_1': 32,
+    'section_2': 32,
+    'section_3': 35,
+    'section_4': 35,
+  };
+  static const Map<String, String> _sectionNames = {
+    'section_1': 'Reading and Writing 1',
+    'section_2': 'Reading and Writing 2',
+    'section_3': 'Math 1',
+    'section_4': 'Math 2',
+  };
 
   late final QuestionsProvider _questionsProvider;
   final DatabaseHelper _answersDb = DatabaseHelper.instance;
   final DatabaseHelperTests _testsDb = DatabaseHelperTests.instance;
+  final DatabaseHelperProgress _progressDb = DatabaseHelperProgress.instance;
   final TestApi _testApi = TestApi();
   final PageController _pageController = PageController();
   final Map<int, TextEditingController> _textControllers = {};
   final Map<int, String> _textInputs = {};
   bool _submitting = false;
+  Timer? _timer;
+  int _millisLeft = 0;
+  int? _resumeQuestionIndex;
+  int? _resumeMillisLeft;
+  bool _showCalculator = false;
+  WebViewController? _calculatorController;
 
   int _currentQuestion = 0;
   late int _currentSectionIndex;
@@ -54,6 +78,7 @@ class _TestPageState extends State<TestPage> {
   @override
   void initState() {
     super.initState();
+    _initCalculator();
     _currentSectionIndex = widget.resumeSectionIndex;
     _questionsProvider = QuestionsProvider(context.read<AuthProvider>());
     if (widget.resumeAnswers != null) {
@@ -96,12 +121,24 @@ class _TestPageState extends State<TestPage> {
 
   @override
   void dispose() {
+    _timer?.cancel();
     _questionsProvider.dispose();
     _pageController.dispose();
     for (final controller in _textControllers.values) {
       controller.dispose();
     }
     super.dispose();
+  }
+
+  void _initCalculator() {
+    if (kIsWeb) return;
+    if (!Platform.isAndroid && !Platform.isIOS && !Platform.isMacOS && !Platform.isWindows && !Platform.isLinux) {
+      return;
+    }
+    final controller = WebViewController()
+      ..setJavaScriptMode(JavaScriptMode.unrestricted)
+      ..loadRequest(Uri.parse('https://www.desmos.com/calculator'));
+    _calculatorController = controller;
   }
 
   Future<void> _initTest() async {
@@ -116,6 +153,7 @@ class _TestPageState extends State<TestPage> {
       } else {
         await _questionsProvider.createUserTest(testId: widget.testId);
       }
+      await _loadStoredProgress();
       await _loadSection();
     } catch (e) {
       setState(() => _error = e.toString());
@@ -149,15 +187,29 @@ class _TestPageState extends State<TestPage> {
       // Apply any resumed answers for this section.
       await _loadSavedAnswersIntoProvider(sectionId, questions);
 
-      if (_pageController.hasClients) {
-        _pageController.jumpToPage(0);
-      } else {
-        WidgetsBinding.instance.addPostFrameCallback((_) {
-          if (_pageController.hasClients) {
-            _pageController.jumpToPage(0);
-          }
-        });
+      final maxIndex = questions.isEmpty ? 0 : questions.length - 1;
+      final targetQuestion = _resumeQuestionIndex != null
+          ? _resumeQuestionIndex!.clamp(0, maxIndex)
+          : 0;
+      _currentQuestion = targetQuestion;
+
+      if (questions.isNotEmpty) {
+        if (_pageController.hasClients) {
+          _pageController.jumpToPage(_currentQuestion);
+        } else {
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (_pageController.hasClients) {
+              _pageController.jumpToPage(_currentQuestion);
+            }
+          });
+        }
       }
+
+      final defaultMillis = _defaultMillisForSection(sectionId);
+      _millisLeft = _resumeMillisLeft ?? defaultMillis;
+      _resumeQuestionIndex = null;
+      _resumeMillisLeft = null;
+      _startTimer(sectionId);
     } catch (e) {
       _error = e.toString();
     } finally {
@@ -211,6 +263,133 @@ class _TestPageState extends State<TestPage> {
       if (option.id == optionId) return option;
     }
     return null;
+  }
+
+  int _defaultMillisForSection(String sectionId) {
+    final minutes = _sectionMinutes[sectionId] ?? 0;
+    return minutes * 60 * 1000;
+  }
+
+  String _labelForSection(String sectionId) {
+    final idx = _sections.indexOf(sectionId);
+    final fallback = idx >= 0 ? 'Section ${idx + 1}' : sectionId;
+    return _sectionNames[sectionId] ?? fallback;
+  }
+
+  void _startTimer(String sectionId) {
+    _timer?.cancel();
+    if (_millisLeft <= 0) {
+      _millisLeft = _defaultMillisForSection(sectionId);
+    }
+    _timer = Timer.periodic(const Duration(seconds: 1), (timer) {
+      if (_millisLeft <= 0) {
+        timer.cancel();
+        setState(() => _millisLeft = 0);
+        return;
+      }
+      setState(() {
+        _millisLeft = (_millisLeft - 1000).clamp(0, 1 << 31);
+      });
+    });
+  }
+
+  String _formatTime(int millis) {
+    final totalSeconds = (millis / 1000).ceil();
+    final minutes = totalSeconds ~/ 60;
+    final seconds = totalSeconds % 60;
+    return '${minutes.toString().padLeft(2, '0')}:${seconds.toString().padLeft(2, '0')}';
+  }
+
+  Widget _buildCalculatorOverlay() {
+    final controller = _calculatorController;
+    return Positioned(
+      right: 12,
+      bottom: 12,
+      child: Material(
+        elevation: 8,
+        borderRadius: BorderRadius.circular(16),
+        child: Container(
+          width: 340,
+          height: 420,
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(color: const Color(0xFFE2E8F0)),
+          ),
+          child: Column(
+            children: [
+              Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFF8FAFC),
+                  borderRadius: const BorderRadius.vertical(
+                    top: Radius.circular(16),
+                  ),
+                  border: Border(
+                    bottom: BorderSide(color: Colors.grey.shade200),
+                  ),
+                ),
+                child: Row(
+                  children: [
+                    const Text(
+                      'Graphing Calculator',
+                      style: TextStyle(
+                        fontWeight: FontWeight.w700,
+                        color: Color(0xFF0F172A),
+                      ),
+                    ),
+                    const Spacer(),
+                    IconButton(
+                      icon: const Icon(Icons.close),
+                      onPressed: () =>
+                          setState(() => _showCalculator = false),
+                    ),
+                  ],
+                ),
+              ),
+              Expanded(
+                child: controller == null
+                    ? const Center(
+                        child: Text(
+                          'Calculator unavailable on this platform.',
+                          textAlign: TextAlign.center,
+                          style: TextStyle(color: Color(0xFF475569)),
+                        ),
+                      )
+                    : ClipRRect(
+                        borderRadius: const BorderRadius.vertical(
+                          bottom: Radius.circular(16),
+                        ),
+                        child: WebViewWidget(controller: controller),
+                      ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _loadStoredProgress() async {
+    if (kIsWeb) return;
+    final userTestId = _questionsProvider.userTestId;
+    if (userTestId == null) return;
+    final row = await _progressDb.getByUserTestId(userTestId);
+    if (row == null) return;
+    final sectionIndex = row['section_index'] as int?;
+    final questionIndex = row['question_index'] as int?;
+    final millisLeft = row['millis_left'] as int?;
+
+    setState(() {
+      if (sectionIndex != null &&
+          sectionIndex >= 0 &&
+          sectionIndex < _sections.length) {
+        _currentSectionIndex = sectionIndex;
+      }
+      _resumeQuestionIndex = questionIndex;
+      _resumeMillisLeft = millisLeft;
+    });
   }
 
   TextEditingController _controllerForQuestion(QuestionModel question) {
@@ -288,6 +467,7 @@ class _TestPageState extends State<TestPage> {
   void _openQuestionList() {
     final questions = _questionsProvider.currentQuestions;
     if (questions.isEmpty) return;
+    final sectionLabel = _labelForSection(_sections[_currentSectionIndex]);
 
     showModalBottomSheet<void>(
       context: context,
@@ -298,7 +478,7 @@ class _TestPageState extends State<TestPage> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(
-              'Section ${_currentSectionIndex + 1} questions',
+              '$sectionLabel questions',
               style: const TextStyle(
                 fontSize: 18,
                 fontWeight: FontWeight.w800,
@@ -392,11 +572,12 @@ class _TestPageState extends State<TestPage> {
     if (questions.isEmpty) return;
 
     final isLastSection = _currentSectionIndex == _sections.length - 1;
+    final sectionLabel = _labelForSection(_sections[_currentSectionIndex]);
     final selectedIndex = await Navigator.push<int>(
       context,
       MaterialPageRoute(
         builder: (_) => _QuestionPreviewPage(
-          sectionLabel: 'Section ${_currentSectionIndex + 1}',
+          sectionLabel: sectionLabel,
           questions: questions,
           flagged: List<bool>.from(_flagged),
           answeredMap: Map<int, int?>.from(_questionsProvider.answers),
@@ -442,6 +623,7 @@ class _TestPageState extends State<TestPage> {
     if (!context.mounted) return shouldExit;
 
     if (shouldExit) {
+      await _persistProgress();
       Navigator.pushNamedAndRemoveUntil(
         context,
         AppRouter.home,
@@ -525,6 +707,19 @@ class _TestPageState extends State<TestPage> {
     return all.where((a) => a['selected_option_id'] != null).toList();
   }
 
+  Future<void> _persistProgress() async {
+    if (kIsWeb) return;
+    final userTestId = _questionsProvider.userTestId;
+    if (userTestId == null) return;
+    await _progressDb.upsertProgress({
+      'user_test_id': userTestId,
+      'test_id': widget.testId,
+      'section_index': _currentSectionIndex,
+      'question_index': _currentQuestion,
+      'millis_left': _millisLeft,
+    });
+  }
+
   List<AnswerSummary> _buildAnswerSummaries() {
     final summaries = <AnswerSummary>[];
     for (final sectionId in _sections) {
@@ -593,10 +788,13 @@ class _TestPageState extends State<TestPage> {
           );
           return;
         }
+        if (!kIsWeb && userTestId != null) {
+          await _progressDb.deleteByUserTestId(userTestId);
+        }
         if (!mounted) return;
         Navigator.pushReplacementNamed(
           context,
-          AppRouter.results,
+          AppRouter.testResults,
           arguments: {
             'userTestId': userTestId,
             'summaries': summaries,
@@ -680,22 +878,27 @@ class _TestPageState extends State<TestPage> {
       return const Center(child: Text('No questions available.'));
     }
 
-    return Column(
+    return Stack(
       children: [
-        _buildToolbar(),
-        const Divider(height: 1),
-        Expanded(
-          child: PageView.builder(
-            controller: _pageController,
-            physics: const ClampingScrollPhysics(),
-            onPageChanged: (index) {
-              setState(() => _currentQuestion = index);
-            },
-            itemCount: questions.length,
-            itemBuilder: (_, index) => _buildQuestionCard(questions, index),
-          ),
+        Column(
+          children: [
+            _buildToolbar(),
+            const Divider(height: 1),
+            Expanded(
+              child: PageView.builder(
+                controller: _pageController,
+                physics: const ClampingScrollPhysics(),
+                onPageChanged: (index) {
+                  setState(() => _currentQuestion = index);
+                },
+                itemCount: questions.length,
+                itemBuilder: (_, index) => _buildQuestionCard(questions, index),
+              ),
+            ),
+            _buildNavigation(questions),
+          ],
         ),
-        _buildNavigation(questions),
+        if (_showCalculator) _buildCalculatorOverlay(),
       ],
     );
   }
@@ -705,6 +908,9 @@ class _TestPageState extends State<TestPage> {
     final isFlagged = _flagged.isNotEmpty &&
         _currentQuestion < _flagged.length &&
         _flagged[_currentQuestion];
+    final timeText = _formatTime(_millisLeft);
+    final isLow = _millisLeft <= 3 * 60 * 1000;
+    final timeColor = isLow ? Colors.red : const Color(0xFF0F172A);
 
     return Container(
       width: double.infinity,
@@ -737,18 +943,50 @@ class _TestPageState extends State<TestPage> {
                 label: 'Text',
                 onTap: _cycleTextSize,
               ),
+              _ToolbarButton(
+                icon: Icons.calculate_outlined,
+                label: 'Calc',
+                onTap: () => setState(() => _showCalculator = !_showCalculator),
+                active: _showCalculator,
+              ),
             ],
           ),
           Text(
-            'Section ${_currentSectionIndex + 1} of ${_sections.length} (${questions.length} Qs)',
+            '${_labelForSection(_sections[_currentSectionIndex])} (${questions.length} Qs)',
             style: const TextStyle(
               color: Color(0xFF475569),
               fontWeight: FontWeight.w700,
             ),
           ),
-          IconButton(
-            icon: const Icon(Icons.close),
-            onPressed: () => _confirmExit(context),
+          Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                decoration: BoxDecoration(
+                  color: timeColor.withOpacity(0.08),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Row(
+                  children: [
+                    Icon(Icons.timer_outlined, size: 16, color: timeColor),
+                    const SizedBox(width: 6),
+                    Text(
+                      timeText,
+                      style: TextStyle(
+                        color: timeColor,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              IconButton(
+                icon: const Icon(Icons.close),
+                onPressed: () => _confirmExit(context),
+              ),
+            ],
           ),
         ],
       ),
@@ -765,7 +1003,7 @@ class _TestPageState extends State<TestPage> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(
-            '${question.section} • Question ${index + 1} of ${questions.length}',
+            '${_labelForSection(question.section)} - Question ${index + 1} of ${questions.length}',
             style: const TextStyle(
               color: Color(0xFF475569),
               fontWeight: FontWeight.w700,
@@ -1062,7 +1300,7 @@ class _QuestionPreviewPage extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(
-              '$sectionLabel • ${questions.length} questions',
+              '$sectionLabel - ${questions.length} questions',
               style: const TextStyle(
                 fontSize: 16,
                 fontWeight: FontWeight.w700,

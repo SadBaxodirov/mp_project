@@ -5,10 +5,13 @@ import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../core/api/test_api.dart';
+import '../../core/api/user_test_api.dart';
 import '../../core/models/test.dart';
+import '../../core/models/user_test.dart';
 import '../../features/auth/state/auth_provider.dart';
 import '../../router.dart';
 import '../../utils/DB_answers.dart';
+import '../../utils/DB_progress.dart';
 import '../../utils/DB_tests.dart';
 import '../../utils/profile_photo_store.dart';
 import '../../widgets/app_logo.dart';
@@ -23,27 +26,40 @@ class HomePage extends StatefulWidget {
 
 class _HomePageState extends State<HomePage> {
   final _testApi = TestApi();
+  final _userTestApi = UserTestApi();
   final _photoStore = ProfilePhotoStore.instance;
   final DatabaseHelper _answersDb = DatabaseHelper.instance;
   final DatabaseHelperTests _testsDb = DatabaseHelperTests.instance;
+  final DatabaseHelperProgress _progressDb = DatabaseHelperProgress.instance;
 
   Uint8List? _photoBytes;
-  late Future<List<Test>> _testsFuture;
+  late Future<_HomeData> _homeFuture;
 
   // goal / progress state (from first version)
   static const _goalPrefsKey = 'home_goal_score';
   int _goalScore = 1400;
   final int _bestScore = 1310;
+  bool _didInitialLoad = false;
 
   @override
   void initState() {
     super.initState();
-    _testsFuture = _loadTests();
+    _homeFuture = _loadHomeData();
     _loadProfilePhoto();
     _loadGoal();
   }
 
-  Future<List<Test>> _loadTests() => _testApi.getTests();
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    // When returning to this page after navigating away, refresh data
+    // so newly saved progress shows up without manual pull-to-refresh.
+    if (_didInitialLoad) {
+      _reload();
+    } else {
+      _didInitialLoad = true;
+    }
+  }
 
   Future<void> _loadProfilePhoto() async {
     final userId = context.read<AuthProvider>().currentUser?.id;
@@ -65,9 +81,9 @@ class _HomePageState extends State<HomePage> {
 
   Future<void> _reload() async {
     setState(() {
-      _testsFuture = _loadTests();
+      _homeFuture = _loadHomeData();
     });
-    await _testsFuture;
+    await _homeFuture;
     await _loadProfilePhoto();
   }
 
@@ -90,6 +106,108 @@ class _HomePageState extends State<HomePage> {
     } catch (e) {
       debugPrint('Error saving goal: $e');
     }
+  }
+
+  Future<_HomeData> _loadHomeData() async {
+    final List<Test> tests = await _testApi.getTests();
+    final testNameById = {for (final t in tests) t.id: t.name};
+
+    final userId = context.read<AuthProvider>().currentUser?.id;
+    List<UserTest> completed = [];
+    if (userId != null) {
+      try {
+        completed = await _userTestApi.getUserTests(userId: userId);
+      } catch (e) {
+        debugPrint('Failed to load completed tests: $e');
+      }
+    }
+
+    final progressRows = await _progressDb.getAll();
+    final active = <_ActiveTestCardData>[];
+
+    for (final row in progressRows) {
+      final testId = (row['test_id'] as num?)?.toInt();
+      final userTestId = (row['user_test_id'] as num?)?.toInt();
+      if (testId == null || userTestId == null) continue;
+
+      final sectionIndex = (row['section_index'] as num?)?.toInt() ?? 0;
+      final millisLeft = (row['millis_left'] as num?)?.toInt() ?? 0;
+      final title = testNameById[testId] ?? 'Test $testId';
+      final status = _sectionName(sectionIndex);
+      final timeRemaining = _formatMillis(millisLeft);
+      final progress = await _computeProgress(testId, userTestId);
+
+      active.add(
+        _ActiveTestCardData(
+          testId: testId,
+          userTestId: userTestId,
+          sectionIndex: sectionIndex,
+          title: title,
+          status: 'Resume $status',
+          progress: progress,
+          timeRemaining: timeRemaining,
+        ),
+      );
+    }
+
+    final completedCards = completed.map((ut) {
+      final title = testNameById[ut.test] ?? 'Test ${ut.test}';
+      final total = (ut.mathScore + ut.englishScore).toStringAsFixed(0);
+      final math = ut.mathScore.toStringAsFixed(0);
+      final eng = ut.englishScore.toStringAsFixed(0);
+      final scoreSummary =
+          'Total: $total - Reading/Writing: $eng - Math: $math';
+      final dateLabel = ut.createdAt.toLocal().toString().split(' ').first;
+      return _CompletedTestCardData(
+        title: title,
+        dateLabel: dateLabel,
+        scoreSummary: scoreSummary,
+        progress: 1,
+      );
+    }).toList();
+
+    return _HomeData(
+      activeTests: active,
+      completedTests: completedCards,
+    );
+  }
+
+  String _sectionName(int index) {
+    switch (index) {
+      case 0:
+        return 'Reading and Writing 1';
+      case 1:
+        return 'Reading and Writing 2';
+      case 2:
+        return 'Math 1';
+      case 3:
+        return 'Math 2';
+      default:
+        return 'Section ${index + 1}';
+    }
+  }
+
+  Future<double> _computeProgress(int testId, int userTestId) async {
+    try {
+      final cachedQuestions = await _testsDb.getTestsById(testId);
+      final total = cachedQuestions.length;
+      if (total == 0) return 0;
+
+      final answers = await _answersDb.getByUserTestId(userTestId);
+      final answered = answers.length;
+      return (answered / total).clamp(0.0, 1.0);
+    } catch (e) {
+      debugPrint('Error computing progress: $e');
+      return 0;
+    }
+  }
+
+  String _formatMillis(int millis) {
+    if (millis <= 0) return 'Time saved';
+    final totalSeconds = (millis / 1000).ceil();
+    final minutes = totalSeconds ~/ 60;
+    final seconds = totalSeconds % 60;
+    return '${minutes}m ${seconds.toString().padLeft(2, '0')}s left';
   }
 
   Future<void> _editGoal() async {
@@ -172,63 +290,6 @@ class _HomePageState extends State<HomePage> {
     await _saveGoal(newGoal);
   }
 
-  /// Resume latest test from local DB (from second version)
-  Future<void> _resumeLatestTest(BuildContext context) async {
-    final messenger = ScaffoldMessenger.of(context);
-    final answers = await _answersDb.getAll();
-    if (!mounted) return;
-
-    if (answers.isEmpty) {
-      messenger.showSnackBar(const SnackBar(
-        content: Text('No saved test to continue.'),
-      ));
-      return;
-    }
-
-    final latestUserTestId = answers.first['user_test_id'] as int;
-    final resumeAnswers = <int, int?>{};
-    for (final row in answers.where(
-          (e) => (e['user_test_id'] as int) == latestUserTestId,
-    )) {
-      resumeAnswers[row['question_id'] as int] =
-      row['selected_option_id'] as int?;
-    }
-
-    int testId = 0;
-    try {
-      final tests = await _testsDb.getTests();
-      if (tests.isNotEmpty) {
-        testId = (tests.first['test_id'] as num).toInt();
-      }
-    } catch (e) {
-      debugPrint('Error loading cached tests: $e');
-      messenger.showSnackBar(const SnackBar(
-        content: Text('Saved answers found, but no cached test metadata.'),
-      ));
-      return;
-    }
-
-    if (testId == 0) {
-      messenger.showSnackBar(const SnackBar(
-        content: Text('No cached test metadata to resume.'),
-      ));
-      return;
-    }
-
-    if (!context.mounted) return;
-
-    Navigator.pushNamed(
-      context,
-      AppRouter.test,
-      arguments: {
-        'testId': testId,
-        'userTestId': latestUserTestId,
-        'resumeAnswers': resumeAnswers,
-        'resumeSectionIndex': 0,
-      },
-    );
-  }
-
   String _initials(String? name) {
     if (name == null || name.isEmpty) return 'BB';
     final parts = name.trim().split(' ');
@@ -294,11 +355,15 @@ class _HomePageState extends State<HomePage> {
         body: RefreshIndicator(
           onRefresh: _reload,
           child: SafeArea(
-            child: FutureBuilder<List<Test>>(
-              future: _testsFuture,
+            child: FutureBuilder<_HomeData>(
+              future: _homeFuture,
               builder: (context, snapshot) {
                 final hasError = snapshot.hasError;
-                final activeTests = _buildActiveTests(snapshot.data ?? []);
+                final data = snapshot.data;
+                final activeTests = data?.activeTests ?? const [];
+                final completedTests = data?.completedTests ?? const [];
+                final completedLabel =
+                    'Overall progress: ${completedTests.length} test${completedTests.length == 1 ? '' : 's'} completed';
                 return SingleChildScrollView(
                   physics: const AlwaysScrollableScrollPhysics(),
                   padding: const EdgeInsets.symmetric(horizontal: 16),
@@ -328,9 +393,9 @@ class _HomePageState extends State<HomePage> {
                         ),
                       ),
                       const SizedBox(height: 8),
-                      const Text(
-                        'Overall progress: 3 of 7 tests completed',
-                        style: TextStyle(
+                      Text(
+                        completedLabel,
+                        style: const TextStyle(
                           color: Color(0xFF6B7280),
                           fontSize: 14,
                         ),
@@ -360,10 +425,9 @@ class _HomePageState extends State<HomePage> {
                           children: [
                             _ActiveTestsTab(
                               tests: activeTests,
-                              onContinue: () => _resumeLatestTest(context),
                             ),
                             const _ScheduledTestsTab(),
-                            const _CompletedTestsTab(),
+                            _CompletedTestsTab(tests: completedTests),
                           ],
                         ),
                       ),
@@ -393,33 +457,14 @@ class _HomePageState extends State<HomePage> {
     );
   }
 
-  List<_ActiveTestCardData> _buildActiveTests(List<Test> apiTests) {
-    if (apiTests.isEmpty) return _sampleActiveTests;
-
-    final mapped = apiTests.take(3).toList();
-    return mapped.asMap().entries.map((entry) {
-      final index = entry.key;
-      final test = entry.value;
-      final progress = 0.35 + (index * 0.2);
-      return _ActiveTestCardData(
-        testId: test.id,
-        title: test.name,
-        status: 'In progress - Practice mode',
-        progress: progress.clamp(0.0, 1.0),
-        timeRemaining: 'Untimed',
-      );
-    }).toList();
-  }
 }
 
 class _ActiveTestsTab extends StatelessWidget {
   const _ActiveTestsTab({
     required this.tests,
-    required this.onContinue,
   });
 
   final List<_ActiveTestCardData> tests;
-  final VoidCallback onContinue;
 
   @override
   Widget build(BuildContext context) {
@@ -450,10 +495,7 @@ class _ActiveTestsTab extends StatelessWidget {
       separatorBuilder: (_, __) => const SizedBox(height: 12),
       itemBuilder: (context, index) {
         final test = tests[index];
-        return _ActiveTestCard(
-          data: test,
-          onResumeLatest: onContinue,
-        );
+        return _ActiveTestCard(data: test);
       },
     );
   }
@@ -464,78 +506,59 @@ class _ScheduledTestsTab extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return ListView.separated(
-      padding: EdgeInsets.zero,
-      physics: const NeverScrollableScrollPhysics(),
-      itemCount: _sampleScheduledTests.length,
-      separatorBuilder: (_, __) => const SizedBox(height: 12),
-      itemBuilder: (context, index) {
-        final test = _sampleScheduledTests[index];
-        return Card(
-          child: Padding(
-            padding: const EdgeInsets.all(16),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  test.title,
-                  style: const TextStyle(
-                    fontSize: 16,
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
-                const SizedBox(height: 6),
-                Text(
-                  '${test.dateLabel} - ${test.timeLabel}',
-                  style: const TextStyle(color: Color(0xFF475569)),
-                ),
-                const SizedBox(height: 8),
-                Row(
-                  children: [
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 10, vertical: 6),
-                      decoration: BoxDecoration(
-                        color: const Color(0xFFE8EDFF),
-                        borderRadius: BorderRadius.circular(10),
-                      ),
-                      child: Text(
-                        test.tag,
-                        style: const TextStyle(
-                          color: Color(0xFF2557D6),
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                    ),
-                    const Spacer(),
-                    TextButton(
-                      onPressed: () => Navigator.pushNamed(
-                          context, AppRouter.testPreviewInfo),
-                      child: const Text('Details'),
-                    ),
-                  ],
-                ),
-              ],
-            ),
+    return Center(
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          const Text(
+            'No scheduled tests.',
+            style: TextStyle(fontWeight: FontWeight.w600),
           ),
-        );
-      },
+          const SizedBox(height: 8),
+          OutlinedButton(
+            onPressed: () => Navigator.pushNamed(context, AppRouter.testList),
+            child: const Text('Find a test'),
+          ),
+        ],
+      ),
     );
   }
 }
 
 class _CompletedTestsTab extends StatelessWidget {
-  const _CompletedTestsTab();
+  const _CompletedTestsTab({required this.tests});
+
+  final List<_CompletedTestCardData> tests;
 
   @override
   Widget build(BuildContext context) {
+    if (tests.isEmpty) {
+      return Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            const Text(
+              'No completed tests yet.',
+              style: TextStyle(fontWeight: FontWeight.w600),
+            ),
+            const SizedBox(height: 8),
+            OutlinedButton(
+              onPressed: () =>
+                  Navigator.pushNamed(context, AppRouter.testList),
+              child: const Text('Start a test'),
+            ),
+          ],
+        ),
+      );
+    }
+
     return ListView.separated(
       padding: EdgeInsets.zero,
       physics: const NeverScrollableScrollPhysics(),
-      itemCount: _sampleCompletedTests.length,
+      itemCount: tests.length,
       separatorBuilder: (_, __) => const SizedBox(height: 12),
       itemBuilder: (context, index) {
-        final test = _sampleCompletedTests[index];
+        final test = tests[index];
         return Card(
           child: Padding(
             padding: const EdgeInsets.all(16),
@@ -599,11 +622,9 @@ class _CompletedTestsTab extends StatelessWidget {
 class _ActiveTestCard extends StatelessWidget {
   const _ActiveTestCard({
     required this.data,
-    required this.onResumeLatest,
   });
 
   final _ActiveTestCardData data;
-  final VoidCallback onResumeLatest;
 
   @override
   Widget build(BuildContext context) {
@@ -676,15 +697,15 @@ class _ActiveTestCard extends StatelessWidget {
               children: [
                 Expanded(
                   child: ElevatedButton(
-                    // If we have a specific testId, go directly to that test.
-                    // Otherwise, fall back to generic "resume latest" logic.
-                    onPressed: data.testId != null
-                        ? () => Navigator.pushNamed(
+                    onPressed: () => Navigator.pushNamed(
                       context,
                       AppRouter.test,
-                      arguments: <int>[data.testId!],
-                    )
-                        : onResumeLatest,
+                      arguments: {
+                        'testId': data.testId,
+                        'userTestId': data.userTestId,
+                        'resumeSectionIndex': data.sectionIndex,
+                      },
+                    ),
                     child: const Text('Continue'),
                   ),
                 ),
@@ -1082,32 +1103,22 @@ class _CircularStat extends StatelessWidget {
 
 class _ActiveTestCardData {
   const _ActiveTestCardData({
-    this.testId,
+    required this.testId,
+    required this.userTestId,
+    required this.sectionIndex,
     required this.title,
     required this.status,
     required this.progress,
     required this.timeRemaining,
   });
 
-  final int? testId; // from first version (preserved)
+  final int testId;
+  final int userTestId;
+  final int sectionIndex;
   final String title;
   final String status;
   final double progress;
   final String timeRemaining;
-}
-
-class _ScheduledTestCardData {
-  const _ScheduledTestCardData({
-    required this.title,
-    required this.dateLabel,
-    required this.timeLabel,
-    required this.tag,
-  });
-
-  final String title;
-  final String dateLabel;
-  final String timeLabel;
-  final String tag;
 }
 
 class _CompletedTestCardData {
@@ -1154,51 +1165,6 @@ class _ProgressStat {
   final Color color;
 }
 
-const _sampleActiveTests = <_ActiveTestCardData>[
-  _ActiveTestCardData(
-    title: 'SAT Practice Test 2',
-    status: 'In progress - Math module 2',
-    progress: 0.6,
-    timeRemaining: '45 min left (timed mode)',
-  ),
-  _ActiveTestCardData(
-    title: 'SAT Practice Test 3',
-    status: 'In progress - Reading & Writing module 1',
-    progress: 0.32,
-    timeRemaining: 'Untimed practice',
-  ),
-];
-
-const _sampleScheduledTests = <_ScheduledTestCardData>[
-  _ScheduledTestCardData(
-    title: 'Mock exam',
-    dateLabel: '23 Feb',
-    timeLabel: '09:00',
-    tag: 'Full test',
-  ),
-  _ScheduledTestCardData(
-    title: 'SAT Practice Test 4',
-    dateLabel: '02 Mar',
-    timeLabel: '14:00',
-    tag: 'Math focus',
-  ),
-];
-
-const _sampleCompletedTests = <_CompletedTestCardData>[
-  _CompletedTestCardData(
-    title: 'SAT Practice Test 1',
-    dateLabel: 'Last week',
-    scoreSummary: 'Total: 1280 - Reading/Writing: 640 - Math: 640',
-    progress: 0.82,
-  ),
-  _CompletedTestCardData(
-    title: 'Test Preview',
-    dateLabel: '2 weeks ago',
-    scoreSummary: 'Finished preview modules',
-    progress: 1,
-  ),
-];
-
 const _practiceCards = <_PracticeCardData>[
   _PracticeCardData(
     title: 'Test Preview',
@@ -1241,3 +1207,13 @@ const _progressStats = <_ProgressStat>[
     color: Color(0xFF10B981),
   ),
 ];
+
+class _HomeData {
+  const _HomeData({
+    required this.activeTests,
+    required this.completedTests,
+  });
+
+  final List<_ActiveTestCardData> activeTests;
+  final List<_CompletedTestCardData> completedTests;
+}
