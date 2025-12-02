@@ -1,9 +1,12 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:flutter_math_fork/flutter_math.dart';
 import 'package:provider/provider.dart';
 
 import '../../core/api/test_api.dart';
 import '../../features/auth/state/auth_provider.dart';
+import '../../features/test/data/models/answer_summary.dart';
 import '../../features/test/data/models/test_model.dart';
 import '../../features/test/state/test_provider.dart';
 import '../../router.dart';
@@ -36,6 +39,9 @@ class _TestPageState extends State<TestPage> {
   final DatabaseHelperTests _testsDb = DatabaseHelperTests.instance;
   final TestApi _testApi = TestApi();
   final PageController _pageController = PageController();
+  final Map<int, TextEditingController> _textControllers = {};
+  final Map<int, String> _textInputs = {};
+  bool _submitting = false;
 
   int _currentQuestion = 0;
   late int _currentSectionIndex;
@@ -74,7 +80,7 @@ class _TestPageState extends State<TestPage> {
     }
   }
 
-  Future<void> _saveAnswer(QuestionModel question, int optionId) async {
+  Future<void> _saveAnswer(QuestionModel question, int? optionId) async {
     if (kIsWeb) return;
     final userTestId = _questionsProvider.userTestId;
     if (userTestId == null) return;
@@ -92,6 +98,9 @@ class _TestPageState extends State<TestPage> {
   void dispose() {
     _questionsProvider.dispose();
     _pageController.dispose();
+    for (final controller in _textControllers.values) {
+      controller.dispose();
+    }
     super.dispose();
   }
 
@@ -187,6 +196,70 @@ class _TestPageState extends State<TestPage> {
     _questionsProvider.selectAnswer(question.id, optionId);
     setState(() {});
     _saveAnswer(question, optionId);
+  }
+
+  OptionModel? _findCorrectOption(QuestionModel question) {
+    for (final option in question.options) {
+      if (option.isCorrect) return option;
+    }
+    return null;
+  }
+
+  OptionModel? _findOptionById(QuestionModel question, int? optionId) {
+    if (optionId == null) return null;
+    for (final option in question.options) {
+      if (option.id == optionId) return option;
+    }
+    return null;
+  }
+
+  TextEditingController _controllerForQuestion(QuestionModel question) {
+    return _textControllers.putIfAbsent(question.id, () {
+      final controller = TextEditingController();
+      final prefill = _textInputs[question.id] ??
+          (question.questionType == 'text'
+              ? _prefillTextInput(question)
+              : null);
+      if (prefill != null) {
+        controller.text = prefill;
+      }
+      return controller;
+    });
+  }
+
+  String? _prefillTextInput(QuestionModel question) {
+    final selectedId = _questionsProvider.answers[question.id];
+    final correctOption = _findCorrectOption(question);
+    if (selectedId != null &&
+        correctOption != null &&
+        selectedId == correctOption.id) {
+      _textInputs[question.id] = correctOption.text;
+      return correctOption.text;
+    }
+    return _textInputs[question.id];
+  }
+
+  Future<void> _handleTextInput(
+    QuestionModel question,
+    String rawValue,
+  ) async {
+    final value = rawValue.trim();
+    setState(() {
+      _textInputs[question.id] = value;
+    });
+
+    final correctOption = _findCorrectOption(question);
+    int? optionId;
+
+    if (value.isNotEmpty && correctOption != null) {
+      final correctAnswer = correctOption.text.trim();
+      if (value == correctAnswer) {
+        optionId = correctOption.id;
+      }
+    }
+
+    _questionsProvider.selectAnswer(question.id, optionId);
+    await _saveAnswer(question, optionId);
   }
 
   void _toggleFlag(int index) {
@@ -452,42 +525,101 @@ class _TestPageState extends State<TestPage> {
     return all.where((a) => a['selected_option_id'] != null).toList();
   }
 
-  Future<void> _completeSection() async {
-    await _persistSectionAnswers();
+  List<AnswerSummary> _buildAnswerSummaries() {
+    final summaries = <AnswerSummary>[];
+    for (final sectionId in _sections) {
+      final questions = _questionsProvider.questionsForSection(sectionId);
+      for (final q in questions) {
+        final selectedId = _questionsProvider.answers[q.id];
+        final correctOption = _findCorrectOption(q);
+        final selectedOption = _findOptionById(q, selectedId);
 
+        final userAnswer = q.questionType == 'text'
+            ? (_textInputs[q.id]?.trim() ?? '')
+            : (selectedOption?.text ?? '');
+
+        final isCorrect = q.questionType == 'text'
+            ? (selectedId != null &&
+                correctOption != null &&
+                selectedId == correctOption.id)
+            : (selectedOption?.isCorrect ?? false);
+
+        summaries.add(
+          AnswerSummary(
+            questionId: q.id,
+            questionText: q.questionText,
+            userAnswer: userAnswer,
+            correctAnswer: correctOption?.text ?? '',
+            isCorrect: isCorrect,
+            section: q.section,
+            score: q.score,
+          ),
+        );
+      }
+    }
+    return summaries;
+  }
+
+  Future<void> _completeSection() async {
     final isLastSection = _currentSectionIndex == _sections.length - 1;
+    if (isLastSection && _submitting) return;
     if (isLastSection) {
-      final userTestId = _questionsProvider.userTestId;
-      final answers = _gatherAllAnswers();
-      if (userTestId != null && answers.isNotEmpty) {
-        try {
-          await _testApi.submitAnswers(
-            userTestId: userTestId,
-            answers: answers,
-          );
-        } catch (e) {
-          if (!mounted) return;
+      setState(() => _submitting = true);
+    }
+
+    try {
+      await _persistSectionAnswers();
+
+      if (isLastSection) {
+        final userTestId = _questionsProvider.userTestId;
+        final answers = _gatherAllAnswers();
+        final summaries = _buildAnswerSummaries();
+        if (userTestId != null && answers.isNotEmpty) {
+          try {
+            await _testApi.submitAnswers(
+              userTestId: userTestId,
+              answers: answers,
+            );
+          } catch (e) {
+            if (!mounted) return;
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(content: Text('Submit failed: $e')),
+            );
+            return;
+          }
+        } else if (answers.isEmpty && mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('Submit failed: $e')),
+            const SnackBar(content: Text('No answers to submit.')),
           );
           return;
         }
-      } else if (answers.isEmpty && mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('No answers to submit.')),
+        if (!mounted) return;
+        Navigator.pushReplacementNamed(
+          context,
+          AppRouter.results,
+          arguments: {
+            'userTestId': userTestId,
+            'summaries': summaries,
+          },
         );
         return;
       }
-      if (!mounted) return;
-      Navigator.pushReplacementNamed(context, AppRouter.results);
-      return;
-    }
 
-    setState(() => _currentSectionIndex += 1);
-    await _loadSection();
+      setState(() => _currentSectionIndex += 1);
+      await _loadSection();
+    } finally {
+      if (isLastSection) {
+        if (mounted) {
+          setState(() => _submitting = false);
+        } else {
+          _submitting = false;
+        }
+      }
+    }
   }
 
   Future<void> _onNext() async {
+    if (_submitting) return;
     final questions = _questionsProvider.currentQuestions;
     if (questions.isEmpty) return;
 
@@ -502,6 +634,24 @@ class _TestPageState extends State<TestPage> {
   Widget _buildBody(BuildContext context) {
     final provider = context.watch<QuestionsProvider>();
     final questions = provider.currentQuestions;
+
+    if (_submitting) {
+      return Container(
+        color: Colors.white,
+        alignment: Alignment.center,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: const [
+            CircularProgressIndicator(),
+            SizedBox(height: 12),
+            Text(
+              'Submitting...',
+              style: TextStyle(fontWeight: FontWeight.w700),
+            ),
+          ],
+        ),
+      );
+    }
 
     if (_initializing || provider.isLoading) {
       return const Center(child: CircularProgressIndicator());
@@ -622,9 +772,9 @@ class _TestPageState extends State<TestPage> {
             ),
           ),
           const SizedBox(height: 10),
-          Text(
-            question.questionText,
-            textScaler: TextScaler.linear(_textScale),
+          _MathText(
+            text: question.questionText,
+            textScale: _textScale,
             style: const TextStyle(
               fontSize: 17,
               fontWeight: FontWeight.w700,
@@ -639,18 +789,26 @@ class _TestPageState extends State<TestPage> {
             ),
           ],
           const SizedBox(height: 16),
-          Column(
-            children: question.options.asMap().entries.map((entry) {
-              final indexOption = entry.key;
-              final option = entry.value;
-              return _AnswerOption(
-                label: String.fromCharCode(65 + indexOption),
-                text: option.text,
-                isSelected: selectedId == option.id,
-                onTap: () => _selectOption(question, option.id),
-              );
-            }).toList(),
-          ),
+          if (question.questionType == 'text')
+            _TextAnswerField(
+              controller: _controllerForQuestion(question),
+              onChanged: (value) => _handleTextInput(question, value),
+              textScale: _textScale,
+            )
+          else
+            Column(
+              children: question.options.asMap().entries.map((entry) {
+                final indexOption = entry.key;
+                final option = entry.value;
+                return _AnswerOption(
+                  label: String.fromCharCode(65 + indexOption),
+                  text: option.text,
+                  isSelected: selectedId == option.id,
+                  onTap: () => _selectOption(question, option.id),
+                  textScale: _textScale,
+                );
+              }).toList(),
+            ),
         ],
       ),
     );
@@ -699,12 +857,22 @@ class _TestPageState extends State<TestPage> {
               const SizedBox(width: 8),
               Flexible(
                 child: ElevatedButton(
-                  onPressed: _onNext,
-                  child: Text(
-                    isLast
-                        ? (isLastSection ? 'Submit' : 'Next Section')
-                        : 'Next',
-                  ),
+                  onPressed: _submitting ? null : _onNext,
+                  child: _submitting
+                      ? const SizedBox(
+                          height: 18,
+                          width: 18,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2,
+                            valueColor:
+                                AlwaysStoppedAnimation<Color>(Colors.white),
+                          ),
+                        )
+                      : Text(
+                          isLast
+                              ? (isLastSection ? 'Submit' : 'Next Section')
+                              : 'Next',
+                        ),
                 ),
               ),
             ],
@@ -802,12 +970,14 @@ class _AnswerOption extends StatelessWidget {
     required this.text,
     required this.isSelected,
     required this.onTap,
+    required this.textScale,
   });
 
   final String label;
   final String text;
   final bool isSelected;
   final VoidCallback onTap;
+  final double textScale;
 
   @override
   Widget build(BuildContext context) {
@@ -848,8 +1018,9 @@ class _AnswerOption extends StatelessWidget {
             ),
             const SizedBox(width: 12),
             Expanded(
-              child: Text(
-                text,
+              child: _MathText(
+                text: text,
+                textScale: textScale,
                 style: const TextStyle(fontSize: 15, height: 1.3),
               ),
             ),
@@ -973,5 +1144,147 @@ class _QuestionPreviewPage extends StatelessWidget {
         ),
       ),
     );
+  }
+}
+
+class _TextAnswerField extends StatelessWidget {
+  const _TextAnswerField({
+    required this.controller,
+    required this.onChanged,
+    required this.textScale,
+  });
+
+  final TextEditingController controller;
+  final ValueChanged<String> onChanged;
+  final double textScale;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          'Enter the answer',
+          textScaler: TextScaler.linear(textScale),
+          style: const TextStyle(
+            fontSize: 15,
+            fontWeight: FontWeight.w700,
+            height: 1.3,
+          ),
+        ),
+        const SizedBox(height: 8),
+        TextField(
+          controller: controller,
+          keyboardType: TextInputType.text,
+          inputFormatters: [
+            FilteringTextInputFormatter.allow(RegExp(r'[0-9.\-/]')),
+            LengthLimitingTextInputFormatter(5),
+          ],
+          decoration: const InputDecoration(
+            hintText: 'e.g. 1.2 or 6/5',
+            border: OutlineInputBorder(),
+          ),
+          onChanged: onChanged,
+        ),
+      ],
+    );
+  }
+}
+
+class _MathText extends StatelessWidget {
+  const _MathText({
+    required this.text,
+    this.style,
+    this.textScale = 1.0,
+  });
+
+  final String text;
+  final TextStyle? style;
+  final double textScale;
+
+  @override
+  Widget build(BuildContext context) {
+    final defaultStyle = DefaultTextStyle.of(context).style;
+    final mergedStyle = defaultStyle.merge(style);
+    final effectiveStyle = mergedStyle.copyWith(
+      color: mergedStyle.color ?? defaultStyle.color ?? Colors.black,
+    );
+    final spans = _parseSpans(text, effectiveStyle);
+
+    // If no LaTeX markup was found, fall back to a regular Text widget.
+    final noMathFound = spans.length == 1 &&
+        spans.first is TextSpan &&
+        (spans.first as TextSpan).text == text;
+
+    if (noMathFound) {
+      return Text(
+        text,
+        style: effectiveStyle,
+        textScaler: TextScaler.linear(textScale),
+        textAlign: TextAlign.start,
+      );
+    }
+
+    return RichText(
+      text: TextSpan(style: effectiveStyle, children: spans),
+      textScaler: TextScaler.linear(textScale),
+      textAlign: TextAlign.start,
+    );
+  }
+
+  List<InlineSpan> _parseSpans(String input, TextStyle baseStyle) {
+    final regex = RegExp(r'(\\\[.*?\\\]|\\\(.*?\\\))', dotAll: true);
+    final spans = <InlineSpan>[];
+    var currentIndex = 0;
+
+    for (final match in regex.allMatches(input)) {
+      if (match.start > currentIndex) {
+        spans.add(TextSpan(text: input.substring(currentIndex, match.start)));
+      }
+
+      final fullMatch = match.group(0)!;
+      final isBlock = fullMatch.startsWith(r'\[');
+      final content = fullMatch.substring(2, fullMatch.length - 2);
+
+      final needsLineBreak = isBlock &&
+          spans.isNotEmpty &&
+          !(spans.last is TextSpan &&
+              ((spans.last as TextSpan).text ?? '').endsWith('\n'));
+      if (needsLineBreak) {
+        spans.add(const TextSpan(text: '\n'));
+      }
+
+      spans.add(
+        WidgetSpan(
+          alignment: PlaceholderAlignment.middle,
+          child: Padding(
+            padding: isBlock
+                ? const EdgeInsets.symmetric(vertical: 8)
+                : EdgeInsets.zero,
+            child: Math.tex(
+              content.trim(),
+              mathStyle: isBlock ? MathStyle.display : MathStyle.text,
+              textStyle: baseStyle.copyWith(height: baseStyle.height),
+            ),
+          ),
+        ),
+      );
+
+      if (isBlock) {
+        spans.add(const TextSpan(text: '\n'));
+      }
+
+      currentIndex = match.end;
+    }
+
+    if (currentIndex < input.length) {
+      spans.add(TextSpan(text: input.substring(currentIndex)));
+    }
+
+    if (spans.isEmpty) {
+      spans.add(TextSpan(text: input));
+    }
+
+    return spans;
   }
 }

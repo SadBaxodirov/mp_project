@@ -1,120 +1,265 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_math_fork/flutter_math.dart';
 
+import '../../core/api/user_test_api.dart';
+import '../../core/models/user_test.dart';
+import '../../features/test/data/models/answer_summary.dart';
+import '../../router.dart';
+import '../../utils/DB_answers.dart';
 import '../../widgets/main_navigation_bar.dart';
 
-class ResultsPage extends StatelessWidget {
-  const ResultsPage({super.key});
+class ResultsPage extends StatefulWidget {
+  const ResultsPage({
+    super.key,
+    this.summaries = const [],
+    this.userTestId,
+  });
+
+  final List<AnswerSummary> summaries;
+  final int? userTestId;
+
+  @override
+  State<ResultsPage> createState() => _ResultsPageState();
+}
+
+class _ResultsPageState extends State<ResultsPage> {
+  final UserTestApi _userTestApi = UserTestApi();
+  bool _loadingScores = false;
+  String? _scoreError;
+  UserTest? _userTest;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadScores();
+  }
+
+  Future<void> _loadScores() async {
+    if (widget.userTestId == null) return;
+    setState(() {
+      _loadingScores = true;
+      _scoreError = null;
+    });
+    try {
+      final userTest = await _userTestApi.getUserTestById(widget.userTestId!);
+      if (!mounted) return;
+      setState(() => _userTest = userTest);
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _scoreError = e.toString());
+    } finally {
+      if (mounted) {
+        setState(() => _loadingScores = false);
+      } else {
+        _loadingScores = false;
+      }
+    }
+  }
+
+  Future<void> _handleBackToHome(BuildContext context) async {
+    if (widget.userTestId != null) {
+      try {
+        await DatabaseHelper.instance.deleteResultsByUserTestId(widget.userTestId!);
+      } catch (e) {
+        if (context.mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('Could not clear local answers: $e')),
+          );
+        }
+      }
+    }
+    if (!context.mounted) return;
+    Navigator.pushNamedAndRemoveUntil(
+      context,
+      AppRouter.home,
+      (_) => false,
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Results & Reports'),
+        title: const Text('Results'),
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back),
+          onPressed: () => _handleBackToHome(context),
+        ),
       ),
       bottomNavigationBar: const MainNavigationBar(currentIndex: 2),
       body: SafeArea(
-        child: SingleChildScrollView(
-          padding: const EdgeInsets.all(16),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const Text(
-                'Progress overview',
-                style: TextStyle(
-                  fontSize: 18,
-                  fontWeight: FontWeight.w800,
-                ),
-              ),
-              const SizedBox(height: 10),
-              const Row(
-                children: [
-                  Expanded(
-                    child: _StatCard(
-                      label: 'Best score',
-                      value: '1310',
-                      subtitle: 'Goal: 1400',
-                    ),
-                  ),
-                  SizedBox(width: 12),
-                  Expanded(
-                    child: _StatCard(
-                      label: 'Avg. Reading/Writing',
-                      value: '640',
-                      subtitle: '3 tests',
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 12),
-              const Row(
-                children: [
-                  Expanded(
-                    child: _StatCard(
-                      label: 'Avg. Math',
-                      value: '670',
-                      subtitle: '3 tests',
-                    ),
-                  ),
-                  SizedBox(width: 12),
-                  Expanded(
-                    child: _StatCard(
-                      label: 'Completed',
-                      value: '6',
-                      subtitle: 'out of 10 planned',
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 16),
-              const Text(
-                'Recent tests',
-                style: TextStyle(
-                  fontSize: 18,
-                  fontWeight: FontWeight.w800,
-                ),
-              ),
-              const SizedBox(height: 10),
-              ..._recentTests.map((test) => Padding(
-                    padding: const EdgeInsets.only(bottom: 12),
-                    child: Card(
-                      child: ListTile(
-                        title: Text(
-                          test.title,
-                          style: const TextStyle(fontWeight: FontWeight.w800),
-                        ),
-                        subtitle: Text(
-                          '${test.date} - Reading/Writing: ${test.rw} - Math: ${test.math}',
-                        ),
-                        trailing: Chip(
-                          label: Text(test.total),
-                          backgroundColor: const Color(0xFFE8EDFF),
-                          side: BorderSide.none,
-                          labelStyle: const TextStyle(
-                            color: Color(0xFF2557D6),
-                            fontWeight: FontWeight.w700,
-                          ),
-                        ),
+        child: widget.summaries.isEmpty
+            ? const _EmptyResults()
+            : ListView.separated(
+                padding: const EdgeInsets.all(16),
+                itemCount: widget.summaries.length + 2,
+                separatorBuilder: (_, __) => const SizedBox(height: 12),
+                itemBuilder: (context, index) {
+                  if (index == 0) {
+                    return _ScoreHeader(
+                      loading: _loadingScores,
+                      error: _scoreError,
+                      mathScore: _userTest?.mathScore,
+                      englishScore: _userTest?.englishScore,
+                    );
+                  }
+                  if (index == widget.summaries.length + 1) {
+                    return SizedBox(
+                      width: double.infinity,
+                      child: ElevatedButton.icon(
+                        onPressed: () => _handleBackToHome(context),
+                        icon: const Icon(Icons.home),
+                        label: const Text('Back to Home'),
                       ),
-                    ),
-                  )),
-            ],
-          ),
+                    );
+                  }
+                  final summary = widget.summaries[index - 1];
+                  return _ResultCard(summary: summary);
+                },
+              ),
+      ),
+    );
+  }
+}
+
+class _ResultCard extends StatelessWidget {
+  const _ResultCard({required this.summary});
+
+  final AnswerSummary summary;
+
+  @override
+  Widget build(BuildContext context) {
+    final isCorrect = summary.isCorrect;
+    final badgeColor = isCorrect ? const Color(0xFF10B981) : Colors.red;
+    final badgeLabel = isCorrect ? 'Correct' : 'Incorrect';
+    final userAnswerDisplay =
+        summary.userAnswer.isEmpty ? '—' : summary.userAnswer;
+    final correctAnswerDisplay =
+        summary.correctAnswer.isEmpty ? '—' : summary.correctAnswer;
+
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(14),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+              decoration: BoxDecoration(
+                color: badgeColor.withOpacity(0.1),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Text(
+                badgeLabel,
+                style: TextStyle(
+                  color: badgeColor,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+            ),
+            const SizedBox(height: 10),
+            const Text(
+              'Question',
+              style: TextStyle(
+                fontWeight: FontWeight.w700,
+                color: Color(0xFF475569),
+              ),
+            ),
+            const SizedBox(height: 6),
+            _MathText(
+              text: summary.questionText,
+              style: const TextStyle(
+                fontSize: 16,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+            const SizedBox(height: 10),
+            const Text(
+              "Your answer",
+              style: TextStyle(
+                fontWeight: FontWeight.w700,
+                color: Color(0xFF475569),
+              ),
+            ),
+            const SizedBox(height: 4),
+            _MathText(
+              text: userAnswerDisplay,
+              style: const TextStyle(fontSize: 15),
+            ),
+            const SizedBox(height: 10),
+            const Text(
+              'Correct answer',
+              style: TextStyle(
+                fontWeight: FontWeight.w700,
+                color: Color(0xFF475569),
+              ),
+            ),
+            const SizedBox(height: 4),
+            _MathText(
+              text: correctAnswerDisplay,
+              style: const TextStyle(fontSize: 15),
+            ),
+          ],
         ),
       ),
     );
   }
 }
 
-class _StatCard extends StatelessWidget {
-  const _StatCard({
-    required this.label,
-    required this.value,
-    required this.subtitle,
+class _EmptyResults extends StatelessWidget {
+  const _EmptyResults();
+
+  @override
+  Widget build(BuildContext context) {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(32),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Icon(Icons.info_outline, size: 48, color: Color(0xFF94A3B8)),
+            const SizedBox(height: 12),
+            const Text(
+              'No results available',
+              style: TextStyle(
+                fontSize: 16,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+            const SizedBox(height: 8),
+            ElevatedButton.icon(
+              onPressed: () => Navigator.pushNamedAndRemoveUntil(
+                context,
+                AppRouter.home,
+                (_) => false,
+              ),
+              icon: const Icon(Icons.home),
+              label: const Text('Back to Home'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _ScoreHeader extends StatelessWidget {
+  const _ScoreHeader({
+    required this.loading,
+    required this.error,
+    required this.mathScore,
+    required this.englishScore,
   });
 
-  final String label;
-  final String value;
-  final String subtitle;
+  final bool loading;
+  final String? error;
+  final double? mathScore;
+  final double? englishScore;
+
+  double? get _total {
+    if (mathScore == null || englishScore == null) return null;
+    return mathScore! + englishScore!;
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -124,23 +269,64 @@ class _StatCard extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(
-              label,
-              style: const TextStyle(color: Color(0xFF475569)),
-            ),
-            const SizedBox(height: 6),
-            Text(
-              value,
-              style: const TextStyle(
-                fontSize: 24,
+            const Text(
+              'Scores',
+              style: TextStyle(
+                fontSize: 16,
                 fontWeight: FontWeight.w800,
               ),
             ),
-            const SizedBox(height: 4),
-            Text(
-              subtitle,
-              style: const TextStyle(color: Color(0xFF475569)),
-            ),
+            const SizedBox(height: 10),
+            if (loading)
+              const Padding(
+                padding: EdgeInsets.symmetric(vertical: 8),
+                child: Row(
+                  children: [
+                    SizedBox(
+                      height: 18,
+                      width: 18,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    ),
+                    SizedBox(width: 8),
+                    Text('Loading scores...'),
+                  ],
+                ),
+              )
+            else if (error != null)
+              Text(
+                error!,
+                style: const TextStyle(color: Colors.red),
+              )
+            else
+              Column(
+                children: [
+                  Row(
+                    children: [
+                      Expanded(
+                        child: _ScoreTile(
+                          label: 'Math',
+                          value: mathScore,
+                          color: const Color(0xFF2563EB),
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: _ScoreTile(
+                          label: 'English',
+                          value: englishScore,
+                          color: const Color(0xFF10B981),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 10),
+                  _ScoreTile(
+                    label: 'Total',
+                    value: _total,
+                    color: const Color(0xFF111827),
+                  ),
+                ],
+              ),
           ],
         ),
       ),
@@ -148,42 +334,140 @@ class _StatCard extends StatelessWidget {
   }
 }
 
-class _RecentTest {
-  const _RecentTest({
-    required this.title,
-    required this.date,
-    required this.total,
-    required this.rw,
-    required this.math,
+class _ScoreTile extends StatelessWidget {
+  const _ScoreTile({
+    required this.label,
+    required this.value,
+    required this.color,
   });
 
-  final String title;
-  final String date;
-  final String total;
-  final String rw;
-  final String math;
+  final String label;
+  final double? value;
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) {
+    final display = value != null
+        ? value!.toStringAsFixed(value!.truncateToDouble() == value ? 0 : 1)
+        : '—';
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: color.withOpacity(0.08),
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            label,
+            style: TextStyle(
+              color: color,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            display,
+            style: TextStyle(
+              color: color,
+              fontSize: 18,
+              fontWeight: FontWeight.w800,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
 }
 
-const _recentTests = <_RecentTest>[
-  _RecentTest(
-    title: 'SAT Practice Test 3',
-    date: 'Nov 18',
-    total: '1320',
-    rw: '660',
-    math: '660',
-  ),
-  _RecentTest(
-    title: 'SAT Practice Test 2',
-    date: 'Oct 30',
-    total: '1280',
-    rw: '640',
-    math: '640',
-  ),
-  _RecentTest(
-    title: 'Test Preview',
-    date: 'Oct 14',
-    total: 'Complete',
-    rw: 'Previewed',
-    math: 'Previewed',
-  ),
-];
+class _MathText extends StatelessWidget {
+  const _MathText({
+    required this.text,
+    this.style,
+  });
+
+  final String text;
+  final TextStyle? style;
+
+  @override
+  Widget build(BuildContext context) {
+    final defaultStyle = DefaultTextStyle.of(context).style;
+    final mergedStyle = defaultStyle.merge(style);
+    final effectiveStyle = mergedStyle.copyWith(
+      color: mergedStyle.color ?? defaultStyle.color ?? Colors.black,
+    );
+    final spans = _parseSpans(text, effectiveStyle);
+
+    final noMathFound = spans.length == 1 &&
+        spans.first is TextSpan &&
+        (spans.first as TextSpan).text == text;
+
+    if (noMathFound) {
+      return Text(
+        text,
+        style: effectiveStyle,
+      );
+    }
+
+    return RichText(
+      text: TextSpan(style: effectiveStyle, children: spans),
+    );
+  }
+
+  List<InlineSpan> _parseSpans(String input, TextStyle baseStyle) {
+    final regex = RegExp(r'(\\\[.*?\\\]|\\\(.*?\\\))', dotAll: true);
+    final spans = <InlineSpan>[];
+    var currentIndex = 0;
+
+    for (final match in regex.allMatches(input)) {
+      if (match.start > currentIndex) {
+        spans.add(TextSpan(text: input.substring(currentIndex, match.start)));
+      }
+
+      final fullMatch = match.group(0)!;
+      final isBlock = fullMatch.startsWith(r'\[');
+      final content = fullMatch.substring(2, fullMatch.length - 2);
+
+      final needsLineBreak = isBlock &&
+          spans.isNotEmpty &&
+          !(spans.last is TextSpan &&
+              ((spans.last as TextSpan).text ?? '').endsWith('\n'));
+      if (needsLineBreak) {
+        spans.add(const TextSpan(text: '\n'));
+      }
+
+      spans.add(
+        WidgetSpan(
+          alignment: PlaceholderAlignment.middle,
+          child: Padding(
+            padding:
+                isBlock ? const EdgeInsets.symmetric(vertical: 8) : EdgeInsets.zero,
+            child: Math.tex(
+              content.trim(),
+              mathStyle: isBlock ? MathStyle.display : MathStyle.text,
+              textStyle: baseStyle.copyWith(height: baseStyle.height),
+            ),
+          ),
+        ),
+      );
+
+      if (isBlock) {
+        spans.add(const TextSpan(text: '\n'));
+      }
+
+      currentIndex = match.end;
+    }
+
+    if (currentIndex < input.length) {
+      spans.add(TextSpan(text: input.substring(currentIndex)));
+    }
+
+    if (spans.isEmpty) {
+      spans.add(TextSpan(text: input));
+    }
+
+    return spans;
+  }
+}

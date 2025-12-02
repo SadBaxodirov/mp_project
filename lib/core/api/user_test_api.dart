@@ -65,4 +65,19 @@ class UserTestApi {
       );
     }
   }
+
+  Future<UserTest> getUserTestById(int userTestId) async {
+    final response = await client.get('/user-tests/$userTestId/');
+
+    if (response.statusCode != 200) {
+      throw Exception(
+        "Failed to load user_test $userTestId (status: ${response.statusCode})",
+      );
+    }
+
+    final Map<String, dynamic> json =
+        jsonDecode(utf8.decode(response.bodyBytes)) as Map<String, dynamic>;
+
+    return UserTest.fromJson(json);
+  }
 }
