@@ -5,6 +5,7 @@ import 'screens/auth/register_page.dart';
 import 'screens/home/home_page.dart';
 import 'screens/profile/profile_page.dart';
 import 'screens/results/results_page.dart';
+import 'screens/results/test_results_page.dart';
 import 'screens/test/testList.dart';
 import 'screens/test/test_page.dart';
 import 'screens/test_preview/preparing_test_preview_screen.dart';
@@ -17,6 +18,7 @@ class AppRouter {
   static const home = '/home';
   static const profile = '/profile';
   static const results = '/results';
+  static const testResults = '/testResults';
   static const testList = '/testList';
   static const test = '/test';
   static const testPreviewInfo = '/testPreviewInfo';
@@ -27,18 +29,19 @@ class AppRouter {
     register: (_) => const RegisterPage(),
     home: (_) => const HomePage(),
     profile: (_) => const ProfilePage(),
-    results: (context) {
+    results: (_) => const ResultsPage(),
+    testResults: (context) {
       final args = ModalRoute.of(context)?.settings.arguments;
       if (args is Map) {
         final summaries =
             (args['summaries'] as List?)?.cast<AnswerSummary>() ?? const [];
         final userTestId = args['userTestId'] as int?;
-        return ResultsPage(
+        return TestResultsPage(
           summaries: summaries,
           userTestId: userTestId,
         );
       }
-      return const ResultsPage();
+      return const TestResultsPage();
     },
     testList: (_) => const TestList(),
     test: (context) {

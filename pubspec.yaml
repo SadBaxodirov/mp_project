@@ -22,6 +22,7 @@ dependencies:
   json_annotation: ^4.9.0
   image_picker: ^1.0.7
   flutter_math_fork: ^0.7.2
+  webview_flutter: ^4.7.0
 
 dev_dependencies:
   flutter_test:
