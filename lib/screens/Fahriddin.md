@@ -1,0 +1,27 @@
+### Fahriddin – Auth & Profile
+
+- Designed and implemented the full **auth flow**: login, registration, and profile, including all form validation and UX.
+- Set up **app bootstrap & guarded navigation** so the app:
+    - Restores JWTs on startup.
+    - Chooses home vs login based on auth state.
+    - Protects authenticated routes.
+- Built the **login experience**:
+    - Username/password validation.
+    - Integration with the `/token/` endpoint.
+    - Loading and error handling (inline + SnackBar).
+- Built the **registration experience**:
+    - Collects full student profile (name, school, grade, phone, email, password).
+    - Validates phone format (`+998…`), password strength, and confirmation.
+    - Calls `/user/register/` and auto-logs in on success.
+- Created the **profile page UI/UX**:
+    - Gradient header, avatar with initials, school/grade chips, stats cards.
+    - “Edit info” bottom sheet to update profile fields and refresh the current user.
+- Implemented **token handling & backend wiring**:
+    - Login/register/update/logout orchestration.
+    - Attaching and refreshing JWT tokens for authenticated API calls.
+- Integrated **test statistics into the profile**:
+    - Fetches the user’s tests from the backend.
+    - Computes and displays averages, last test date, and per-subject breakdown.
+- Added **local avatar support**:
+    - Pick profile photos from the gallery.
+    - Store them locally per user (no server upload).
